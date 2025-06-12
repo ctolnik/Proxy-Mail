@@ -1,0 +1,111 @@
+# Example configuration for multiple mailboxes
+# Copy this to config.yaml and modify with your settings
+
+servers:
+  # First Gmail account (Personal)
+  - name: "personal-gmail"
+    pop3:
+      host: "pop.gmail.com"
+      port: 995
+      use_tls: true
+      username: "personal@gmail.com"
+      password: "your-gmail-app-password-1"
+    imap:
+      host: "imap.gmail.com"
+      port: 993
+      use_tls: true
+      username: "personal@gmail.com"
+      password: "your-gmail-app-password-1"
+    smtp:
+      host: "smtp.gmail.com"
+      port: 587
+      use_tls: true
+      username: "personal@gmail.com"
+      password: "your-gmail-app-password-1"
+
+  # Second Gmail account (Work)
+  - name: "work-gmail"
+    pop3:
+      host: "pop.gmail.com"
+      port: 995
+      use_tls: true
+      username: "work@gmail.com"
+      password: "your-gmail-app-password-2"
+    imap:
+      host: "imap.gmail.com"
+      port: 993
+      use_tls: true
+      username: "work@gmail.com"
+      password: "your-gmail-app-password-2"
+    smtp:
+      host: "smtp.gmail.com"
+      port: 587
+      use_tls: true
+      username: "work@gmail.com"
+      password: "your-gmail-app-password-2"
+
+  # Outlook/Hotmail account
+  - name: "business-outlook"
+    pop3:
+      host: "outlook.office365.com"
+      port: 995
+      use_tls: true
+      username: "business@company.com"
+      password: "your-outlook-password"
+    imap:
+      host: "outlook.office365.com"
+      port: 993
+      use_tls: true
+      username: "business@company.com"
+      password: "your-outlook-password"
+    smtp:
+      host: "smtp-mail.outlook.com"
+      port: 587
+      use_tls: true
+      username: "business@company.com"
+      password: "your-outlook-password"
+
+  # Yandex account
+  - name: "yandex-account"
+    pop3:
+      host: "pop.yandex.com"
+      port: 995
+      use_tls: true
+      username: "username@yandex.com"
+      password: "your-yandex-password"
+    imap:
+      host: "imap.yandex.com"
+      port: 993
+      use_tls: true
+      username: "username@yandex.com"
+      password: "your-yandex-password"
+    smtp:
+      host: "smtp.yandex.com"
+      port: 587
+      use_tls: true
+      username: "username@yandex.com"
+      password: "your-yandex-password"
+
+# Local server settings (what your email client connects to)
+local:
+  pop3:
+    host: "0.0.0.0"  # Listen on all interfaces
+    port: 110         # Standard POP3 port
+    use_tls: false    # No encryption for local connections
+  imap:
+    host: "0.0.0.0"  # Listen on all interfaces
+    port: 143         # Standard IMAP port
+    use_tls: false    # No encryption for local connections
+  smtp:
+    host: "0.0.0.0"  # Listen on all interfaces
+    port: 25          # Standard SMTP port
+    use_tls: false    # No encryption for local connections
+
+# Notes:
+# 1. For Gmail, you must use App Passwords (not your regular password)
+# 2. Enable 2-Factor Authentication in Gmail first
+# 3. Generate App Password: Google Account → Security → 2-Step Verification → App passwords
+# 4. The proxy will automatically handle authentication with upstream servers
+# 5. Configure your email client to connect to localhost with the ports above
+# 6. Use any username/password in your email client - they will be ignored
+
