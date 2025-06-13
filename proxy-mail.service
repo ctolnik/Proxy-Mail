@@ -1,0 +1,45 @@
+[Unit]
+Description=Email Proxy Service - Bridges legacy email clients with modern secure providers
+Documentation=https://github.com/ctolnik/Proxy-Mail
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=proxy-mail
+Group=proxy-mail
+WorkingDirectory=/var/lib/proxy-mail
+ExecStart=/usr/local/bin/proxy-mail -config /etc/proxy-mail.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/proxy-mail
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=proxy-mail
+
+[Install]
+WantedBy=multi-user.target
+

@@ -322,33 +322,166 @@ servers:
    - Verify `use_tls` settings match provider requirements
    - Check port numbers (993/995 for TLS, 143/110 for plain)
 
-### Logging
+### Advanced Logging Options
 
-The service logs all connections and errors to stdout. Run with:
+**Development/Testing** (detailed logs to console):
+```bash
+./proxy-mail -config config.yaml
+```
+
+**Production with log file**:
 ```bash
 ./proxy-mail -config config.yaml 2>&1 | tee proxy-mail.log
 ```
 
-## Running as Service
+**Systemd service logs** (when installed as service):
+```bash
+# Real-time logs
+sudo journalctl -u proxy-mail -f
 
-### systemd (Linux)
+# Logs with specific time range
+sudo journalctl -u proxy-mail --since "2024-06-13 10:00:00" --until "2024-06-13 12:00:00"
 
-Create `/etc/systemd/system/proxy-mail.service`:
-```ini
-[Unit]
-Description=Email Proxy Service
-After=network.target
+# Only error logs
+sudo journalctl -u proxy-mail -p err
 
-[Service]
-Type=simple
-User=proxy-mail
-WorkingDirectory=/opt/proxy-mail
-ExecStart=/opt/proxy-mail/proxy-mail -config /opt/proxy-mail/config.yaml
-Restart=always
-RestartSec=10
+# Export logs to file
+sudo journalctl -u proxy-mail --since today > proxy-mail-today.log
+```
 
-[Install]
-WantedBy=multi-user.target
+**Log Filtering Examples**:
+```bash
+# Show only POP3 connections
+sudo journalctl -u proxy-mail | grep "\[POP3\]"
+
+# Show authentication events
+sudo journalctl -u proxy-mail | grep -E "(USER|LOGIN|AUTH)"
+
+# Show client connections
+sudo journalctl -u proxy-mail | grep "Client connected"
+
+# Show errors only
+sudo journalctl -u proxy-mail | grep "ERROR"
+```
+
+## Enhanced Logging
+
+The service now provides detailed logging for all operations:
+
+### Log Format
+- `[POP3]`, `[IMAP]`, `[SMTP]` prefixes identify the protocol
+- Client IP addresses are tracked for each connection
+- Upstream server connections show TLS status and mailbox
+- All commands and responses are logged (passwords are hidden)
+- Authentication credential replacement is logged
+
+### Example Log Output
+```
+2024-06-13T17:45:01Z [POP3] Client connected from 192.168.1.100:52341
+2024-06-13T17:45:01Z [POP3] Using server config 'personal-gmail' for client 192.168.1.100:52341
+2024-06-13T17:45:01Z [POP3] Connecting to upstream server pop.gmail.com:995 (TLS: true) for mailbox personal@gmail.com
+2024-06-13T17:45:02Z [POP3] Successfully connected to upstream server pop.gmail.com:995 for mailbox personal@gmail.com
+2024-06-13T17:45:02Z [POP3] Started downstream proxy (server -> client) for 192.168.1.100:52341
+2024-06-13T17:45:02Z [POP3] Started upstream proxy (client -> server) for 192.168.1.100:52341
+2024-06-13T17:45:02Z [POP3] SERVER -> CLIENT (192.168.1.100:52341): +OK POP3 server ready
+2024-06-13T17:45:03Z [POP3] CLIENT -> SERVER (192.168.1.100:52341): USER [client_provided] -> USER personal@gmail.com
+2024-06-13T17:45:03Z [POP3] CLIENT -> SERVER (192.168.1.100:52341): PASS [client_provided] -> PASS [hidden]
+```
+
+## Running as systemd Service
+
+### Automated Installation (Recommended)
+
+1. **Build the service**:
+   ```bash
+   go build -o proxy-mail
+   ```
+
+2. **Run the installation script**:
+   ```bash
+   chmod +x install.sh
+   sudo ./install.sh
+   ```
+
+3. **Edit configuration**:
+   ```bash
+   sudo nano /etc/proxy-mail.yaml
+   ```
+
+4. **Start the service**:
+   ```bash
+   sudo systemctl start proxy-mail
+   sudo systemctl status proxy-mail
+   ```
+
+### Manual Installation
+
+If you prefer manual installation:
+
+1. **Create user and directories**:
+   ```bash
+   sudo useradd --system --home-dir /var/lib/proxy-mail --create-home --shell /bin/false proxy-mail
+   sudo mkdir -p /var/lib/proxy-mail /var/log/proxy-mail
+   sudo chown -R proxy-mail:proxy-mail /var/lib/proxy-mail /var/log/proxy-mail
+   ```
+
+2. **Install binary and service**:
+   ```bash
+   sudo cp proxy-mail /usr/local/bin/
+   sudo cp proxy-mail.service /etc/systemd/system/
+   sudo cp config-example.yaml /etc/proxy-mail.yaml
+   sudo chown root:proxy-mail /etc/proxy-mail.yaml
+   sudo chmod 640 /etc/proxy-mail.yaml
+   ```
+
+3. **Enable and start service**:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable proxy-mail
+   sudo systemctl start proxy-mail
+   ```
+
+### Service Management Commands
+
+```bash
+# Check service status
+sudo systemctl status proxy-mail
+
+# Start service
+sudo systemctl start proxy-mail
+
+# Stop service
+sudo systemctl stop proxy-mail
+
+# Restart service
+sudo systemctl restart proxy-mail
+
+# View logs (real-time)
+sudo journalctl -u proxy-mail -f
+
+# View recent logs
+sudo journalctl -u proxy-mail --since "1 hour ago"
+
+# View logs with timestamps
+sudo journalctl -u proxy-mail -o short-iso
+```
+
+### Security Features
+
+The systemd service includes security hardening:
+- Runs as non-privileged `proxy-mail` user
+- Private `/tmp` and `/dev` filesystems
+- Protected `/home` and read-only system directories
+- Restricted system calls and kernel access
+- Memory execution protection
+- Configuration file protected with `640` permissions
+
+### Uninstallation
+
+To remove the service:
+```bash
+chmod +x uninstall.sh
+sudo ./uninstall.sh
 ```
 
 ### macOS (launchd)
