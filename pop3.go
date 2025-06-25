@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -67,78 +68,535 @@ func (s *POP3Server) handleConnection(localConn net.Conn) {
 	clientAddr := localConn.RemoteAddr().String()
 	log.Printf("[POP3] Client connected from %s", clientAddr)
 
-	// Get the first available POP3 server config
+	// Get the first available server config (prefer POP3, fallback to IMAP)
 	serverConfig := s.config.GetServerByProtocol("pop3")
-	if serverConfig == nil || serverConfig.POP3 == nil {
-		log.Printf("[POP3] ERROR: No POP3 server configuration found for client %s", clientAddr)
-		fmt.Fprintf(localConn, "-ERR No POP3 server configured\r\n")
+	if serverConfig == nil {
+		// Fallback to IMAP if no POP3 available
+		serverConfig = s.config.GetServerByProtocol("imap")
+	}
+
+	if serverConfig == nil {
+		log.Printf("[POP3] ERROR: No POP3 or IMAP server configuration found for client %s", clientAddr)
+		fmt.Fprintf(localConn, "-ERR No mail server configured\r\n")
 		return
 	}
 
-	log.Printf("[POP3] Using server config '%s' for client %s", serverConfig.Name, clientAddr)
+	// Determine which upstream protocol to use
+	var useIMAP bool
+	var upstreamConfig *MailServerConfig
+	var protocol string
 
-	// Connect to upstream POP3 server
-	upstreamAddr := fmt.Sprintf("%s:%d", serverConfig.POP3.Host, serverConfig.POP3.Port)
+	if serverConfig.POP3 != nil {
+		upstreamConfig = serverConfig.POP3
+		protocol = "POP3"
+		useIMAP = false
+	} else if serverConfig.IMAP != nil {
+		upstreamConfig = serverConfig.IMAP
+		protocol = "IMAP"
+		useIMAP = true
+	} else {
+		log.Printf("[POP3] ERROR: Server config '%s' has no POP3 or IMAP configuration", serverConfig.Name)
+		fmt.Fprintf(localConn, "-ERR No mail server configured\r\n")
+		return
+	}
+
+	log.Printf("[POP3] Using server config '%s' (%s upstream) for client %s", serverConfig.Name, protocol, clientAddr)
+
+	// Connect to upstream server
+	upstreamAddr := fmt.Sprintf("%s:%d", upstreamConfig.Host, upstreamConfig.Port)
 	var upstreamConn net.Conn
 	var err error
 
-	log.Printf("[POP3] Connecting to upstream server %s (TLS: %v) for mailbox %s", upstreamAddr, serverConfig.POP3.UseTLS, serverConfig.POP3.Username)
+	log.Printf("[POP3] Connecting to upstream %s server %s (TLS: %v) for mailbox %s", protocol, upstreamAddr, upstreamConfig.UseTLS, upstreamConfig.Username)
 
-	if serverConfig.POP3.UseTLS {
-		upstreamConn, err = tls.Dial("tcp", upstreamAddr, &tls.Config{ServerName: serverConfig.POP3.Host})
+	if upstreamConfig.UseTLS {
+		upstreamConn, err = tls.Dial("tcp", upstreamAddr, &tls.Config{ServerName: upstreamConfig.Host})
 	} else {
 		upstreamConn, err = net.Dial("tcp", upstreamAddr)
 	}
 
 	if err != nil {
-		log.Printf("[POP3] ERROR: Failed to connect to upstream server %s for mailbox %s: %v", upstreamAddr, serverConfig.POP3.Username, err)
+		log.Printf("[POP3] ERROR: Failed to connect to upstream %s server %s for mailbox %s: %v", protocol, upstreamAddr, upstreamConfig.Username, err)
 		fmt.Fprintf(localConn, "-ERR Cannot connect to mail server\r\n")
 		return
 	}
 	defer upstreamConn.Close()
 
-	log.Printf("[POP3] Successfully connected to upstream server %s for mailbox %s", upstreamAddr, serverConfig.POP3.Username)
+	log.Printf("[POP3] Successfully connected to upstream %s server %s for mailbox %s", protocol, upstreamAddr, upstreamConfig.Username)
 
-	// Start proxying data between connections
+	if useIMAP {
+		// Handle POP3 client with IMAP upstream
+		s.handleIMAPBackend(localConn, upstreamConn, upstreamConfig, clientAddr)
+	} else {
+		// Handle POP3 client with POP3 upstream
+		s.handlePOP3Backend(localConn, upstreamConn, upstreamConfig, clientAddr)
+	}
+}
+
+func (s *POP3Server) handlePOP3Backend(localConn, upstreamConn net.Conn, upstreamConfig *MailServerConfig, clientAddr string) {
+
+	// Start proxying data between connections for POP3 -> POP3
 	done := make(chan bool, 2)
 
 	// Proxy from upstream to local client
 	go func() {
-		log.Printf("[POP3] Started downstream proxy (server -> client) for %s", clientAddr)
+		log.Printf("[POP3] Started downstream POP3 proxy (server -> client) for %s", clientAddr)
 		scanner := bufio.NewScanner(upstreamConn)
 		for scanner.Scan() {
 			line := scanner.Text()
-			log.Printf("[POP3] SERVER -> CLIENT (%s): %s", clientAddr, line)
+			log.Printf("[POP3] POP3-SERVER -> CLIENT (%s): %s", clientAddr, line)
 			fmt.Fprintf(localConn, "%s\r\n", line)
 		}
-		log.Printf("[POP3] Downstream proxy closed for %s", clientAddr)
+		log.Printf("[POP3] Downstream POP3 proxy closed for %s", clientAddr)
 		done <- true
 	}()
 
 	// Proxy from local client to upstream
 	go func() {
-		log.Printf("[POP3] Started upstream proxy (client -> server) for %s", clientAddr)
+		log.Printf("[POP3] Started upstream POP3 proxy (client -> server) for %s", clientAddr)
 		scanner := bufio.NewScanner(localConn)
 		for scanner.Scan() {
 			line := scanner.Text()
 			command := strings.ToUpper(strings.TrimSpace(line))
-			
+
 			// Handle authentication transparently
 			if strings.HasPrefix(command, "USER ") {
-				log.Printf("[POP3] CLIENT -> SERVER (%s): USER [client_provided] -> USER %s", clientAddr, serverConfig.POP3.Username)
-				fmt.Fprintf(upstreamConn, "USER %s\r\n", serverConfig.POP3.Username)
+				log.Printf("[POP3] CLIENT -> POP3-SERVER (%s): USER [client_provided] -> USER %s", clientAddr, upstreamConfig.Username)
+				fmt.Fprintf(upstreamConn, "USER %s\r\n", upstreamConfig.Username)
 			} else if strings.HasPrefix(command, "PASS ") {
-				log.Printf("[POP3] CLIENT -> SERVER (%s): PASS [client_provided] -> PASS [hidden]", clientAddr)
-				fmt.Fprintf(upstreamConn, "PASS %s\r\n", serverConfig.POP3.Password)
+				log.Printf("[POP3] CLIENT -> POP3-SERVER (%s): PASS [client_provided] -> PASS [hidden]", clientAddr)
+				fmt.Fprintf(upstreamConn, "PASS %s\r\n", upstreamConfig.Password)
 			} else {
-				log.Printf("[POP3] CLIENT -> SERVER (%s): %s", clientAddr, line)
+				log.Printf("[POP3] CLIENT -> POP3-SERVER (%s): %s", clientAddr, line)
 				fmt.Fprintf(upstreamConn, "%s\r\n", line)
 			}
 		}
-		log.Printf("[POP3] Upstream proxy closed for %s", clientAddr)
+		log.Printf("[POP3] Upstream POP3 proxy closed for %s", clientAddr)
 		done <- true
 	}()
 
 	<-done
-	log.Printf("[POP3] Client %s disconnected from mailbox %s", clientAddr, serverConfig.POP3.Username)
+	log.Printf("[POP3] Client %s disconnected from POP3 mailbox %s", clientAddr, upstreamConfig.Username)
 }
+
+func (s *POP3Server) handleIMAPBackend(localConn, upstreamConn net.Conn, upstreamConfig *MailServerConfig, clientAddr string) {
+	log.Printf("[POP3] Starting POP3-to-IMAP translation for client %s", clientAddr)
+
+	// IMAP session state
+	var imapTag int = 1000
+	var authenticated bool = false
+	var selectedMailbox bool = false
+	var messageCount int = 0
+	var messages []IMAPMessage
+
+	// POP3 session state
+	var pop3State string = "AUTHORIZATION" // AUTHORIZATION, TRANSACTION, UPDATE
+
+	// Read IMAP greeting
+	scanner := bufio.NewScanner(upstreamConn)
+	if scanner.Scan() {
+		greeting := scanner.Text()
+		log.Printf("[POP3] IMAP-SERVER -> PROXY (%s): %s", clientAddr, greeting)
+	}
+
+	// Send POP3 greeting to client
+	fmt.Fprintf(localConn, "+OK POP3 server ready (IMAP backend)\r\n")
+	log.Printf("[POP3] PROXY -> CLIENT (%s): +OK POP3 server ready (IMAP backend)", clientAddr)
+
+	// Handle POP3 commands and translate to IMAP
+	clientReader := bufio.NewReader(localConn)
+	for {
+		// Read line as raw bytes to preserve encoding
+		lineBytes, err := clientReader.ReadBytes('\n')
+		if err != nil {
+			log.Printf("[POP3] Client %s disconnected: %v", clientAddr, err)
+			break
+		}
+		
+		// Convert to string for command parsing only
+		line := strings.TrimSpace(string(lineBytes))
+		if line == "" {
+			continue
+		}
+
+		parts := strings.Fields(strings.ToUpper(line))
+		if len(parts) == 0 {
+			continue
+		}
+
+		command := parts[0]
+		log.Printf("[POP3] CLIENT -> PROXY (%s): %s", clientAddr, line)
+
+		switch command {
+		case "USER":
+			if pop3State != "AUTHORIZATION" {
+				fmt.Fprintf(localConn, "-ERR Command not valid in this state\r\n")
+				continue
+			}
+			// Store username, but don't send to IMAP yet
+			fmt.Fprintf(localConn, "+OK User accepted\r\n")
+			log.Printf("[POP3] PROXY -> CLIENT (%s): +OK User accepted", clientAddr)
+
+		case "PASS":
+			if pop3State != "AUTHORIZATION" {
+				fmt.Fprintf(localConn, "-ERR Command not valid in this state\r\n")
+				continue
+			}
+
+			// Authenticate with IMAP
+			if !authenticated {
+				imapTag++
+				loginCmd := fmt.Sprintf("A%d LOGIN %s %s\r\n", imapTag, upstreamConfig.Username, upstreamConfig.Password)
+				fmt.Fprintf(upstreamConn, loginCmd)
+				log.Printf("[POP3] PROXY -> IMAP-SERVER (%s): A%d LOGIN %s [hidden]", clientAddr, imapTag, upstreamConfig.Username)
+
+				// Read IMAP response
+				for scanner.Scan() {
+					response := scanner.Text()
+					log.Printf("[POP3] IMAP-SERVER -> PROXY (%s): %s", clientAddr, response)
+					if strings.HasPrefix(response, fmt.Sprintf("A%d OK", imapTag)) {
+						authenticated = true
+						break
+					} else if strings.HasPrefix(response, fmt.Sprintf("A%d NO", imapTag)) || strings.HasPrefix(response, fmt.Sprintf("A%d BAD", imapTag)) {
+						fmt.Fprintf(localConn, "-ERR Authentication failed\r\n")
+						log.Printf("[POP3] PROXY -> CLIENT (%s): -ERR Authentication failed", clientAddr)
+						return
+					}
+				}
+			}
+
+			if authenticated {
+				// Select INBOX
+				if !selectedMailbox {
+					imapTag++
+					selectCmd := fmt.Sprintf("A%d SELECT INBOX\r\n", imapTag)
+					fmt.Fprintf(upstreamConn, selectCmd)
+					log.Printf("[POP3] PROXY -> IMAP-SERVER (%s): A%d SELECT INBOX", clientAddr, imapTag)
+
+					// Read SELECT response
+					for scanner.Scan() {
+						response := scanner.Text()
+						log.Printf("[POP3] IMAP-SERVER -> PROXY (%s): %s", clientAddr, response)
+
+						// Parse EXISTS response
+						if strings.Contains(response, "EXISTS") {
+							fields := strings.Fields(response)
+							if len(fields) >= 2 {
+								if count, err := strconv.Atoi(fields[1]); err == nil {
+									messageCount = count
+								}
+							}
+						}
+
+						if strings.HasPrefix(response, fmt.Sprintf("A%d OK", imapTag)) {
+							selectedMailbox = true
+							break
+						} else if strings.HasPrefix(response, fmt.Sprintf("A%d NO", imapTag)) || strings.HasPrefix(response, fmt.Sprintf("A%d BAD", imapTag)) {
+							fmt.Fprintf(localConn, "-ERR Cannot select INBOX\r\n")
+							log.Printf("[POP3] PROXY -> CLIENT (%s): -ERR Cannot select INBOX", clientAddr)
+							return
+						}
+					}
+				}
+
+				pop3State = "TRANSACTION"
+				fmt.Fprintf(localConn, "+OK Mailbox locked and ready\r\n")
+				log.Printf("[POP3] PROXY -> CLIENT (%s): +OK Mailbox locked and ready", clientAddr)
+			}
+
+		case "STAT":
+			if pop3State != "TRANSACTION" {
+				fmt.Fprintf(localConn, "-ERR Command not valid in this state\r\n")
+				continue
+			}
+
+			// Get mailbox status from IMAP
+			totalSize := 0
+			for _, msg := range messages {
+				totalSize += msg.Size
+			}
+
+			fmt.Fprintf(localConn, "+OK %d %d\r\n", messageCount, totalSize)
+			log.Printf("[POP3] PROXY -> CLIENT (%s): +OK %d %d", clientAddr, messageCount, totalSize)
+
+		case "LIST":
+			if pop3State != "TRANSACTION" {
+				fmt.Fprintf(localConn, "-ERR Command not valid in this state\r\n")
+				continue
+			}
+
+			if len(parts) == 1 {
+				// LIST all messages
+				fmt.Fprintf(localConn, "+OK %d messages\r\n", messageCount)
+				for i := 1; i <= messageCount; i++ {
+					size := 1024 // Default size, would need IMAP FETCH to get real size
+					fmt.Fprintf(localConn, "%d %d\r\n", i, size)
+				}
+				fmt.Fprintf(localConn, ".\r\n")
+				log.Printf("[POP3] PROXY -> CLIENT (%s): Listed %d messages", clientAddr, messageCount)
+			} else if len(parts) == 2 {
+				// LIST specific message
+				if msgNum, err := strconv.Atoi(parts[1]); err == nil && msgNum > 0 && msgNum <= messageCount {
+					size := 1024 // Default size
+					fmt.Fprintf(localConn, "+OK %d %d\r\n", msgNum, size)
+					log.Printf("[POP3] PROXY -> CLIENT (%s): +OK %d %d", clientAddr, msgNum, size)
+				} else {
+					fmt.Fprintf(localConn, "-ERR No such message\r\n")
+				}
+			}
+
+		case "UIDL":
+			if pop3State != "TRANSACTION" {
+				fmt.Fprintf(localConn, "-ERR Command not valid in this state\r\n")
+				continue
+			}
+
+			if len(parts) == 1 {
+				// UIDL all messages
+				fmt.Fprintf(localConn, "+OK unique-id listing follows\r\n")
+				for i := 1; i <= messageCount; i++ {
+					// Generate a simple UID based on message number
+					// In a real implementation, you'd get this from IMAP UID FETCH
+					uid := fmt.Sprintf("%s.%d", upstreamConfig.Username, i)
+					fmt.Fprintf(localConn, "%d %s\r\n", i, uid)
+				}
+				fmt.Fprintf(localConn, ".\r\n")
+				log.Printf("[POP3] PROXY -> CLIENT (%s): UIDL listed %d messages", clientAddr, messageCount)
+			} else if len(parts) == 2 {
+				// UIDL specific message
+				if msgNum, err := strconv.Atoi(parts[1]); err == nil && msgNum > 0 && msgNum <= messageCount {
+					uid := fmt.Sprintf("%s.%d", upstreamConfig.Username, msgNum)
+					fmt.Fprintf(localConn, "+OK %d %s\r\n", msgNum, uid)
+					log.Printf("[POP3] PROXY -> CLIENT (%s): +OK %d %s", clientAddr, msgNum, uid)
+				} else {
+					fmt.Fprintf(localConn, "-ERR No such message\r\n")
+				}
+			}
+
+		case "RETR":
+			if pop3State != "TRANSACTION" {
+				fmt.Fprintf(localConn, "-ERR Command not valid in this state\r\n")
+				continue
+			}
+
+			if len(parts) != 2 {
+				fmt.Fprintf(localConn, "-ERR Invalid syntax\r\n")
+				continue
+			}
+
+			msgNum, err := strconv.Atoi(parts[1])
+			if err != nil || msgNum < 1 || msgNum > messageCount {
+				fmt.Fprintf(localConn, "-ERR No such message\r\n")
+				continue
+			}
+
+			// Fetch message from IMAP
+			imapTag++
+			fetchCmd := fmt.Sprintf("A%d FETCH %d (RFC822)\r\n", imapTag, msgNum)
+			fmt.Fprintf(upstreamConn, fetchCmd)
+			log.Printf("[POP3] PROXY -> IMAP-SERVER (%s): A%d FETCH %d (RFC822)", clientAddr, imapTag, msgNum)
+
+			fmt.Fprintf(localConn, "+OK Message follows\r\n")
+
+			// Read and forward IMAP FETCH response
+			inMessage := false
+			for scanner.Scan() {
+				response := scanner.Text()
+				log.Printf("[POP3] IMAP-SERVER -> PROXY (%s): %s", clientAddr, response)
+
+				if strings.Contains(response, "RFC822") {
+					inMessage = true
+					continue
+				}
+
+				if inMessage {
+					if strings.HasPrefix(response, fmt.Sprintf("A%d OK", imapTag)) {
+						break
+					} else if strings.HasPrefix(response, ")") {
+						continue
+					} else {
+						fmt.Fprintf(localConn, "%s\r\n", response)
+					}
+				}
+			}
+
+			fmt.Fprintf(localConn, ".\r\n")
+			log.Printf("[POP3] PROXY -> CLIENT (%s): Message %d delivered", clientAddr, msgNum)
+
+		case "TOP":
+			if pop3State != "TRANSACTION" {
+				fmt.Fprintf(localConn, "-ERR Command not valid in this state\r\n")
+				continue
+			}
+
+			if len(parts) != 3 {
+				fmt.Fprintf(localConn, "-ERR Invalid syntax\r\n")
+				continue
+			}
+
+			msgNum, err := strconv.Atoi(parts[1])
+			if err != nil || msgNum < 1 || msgNum > messageCount {
+				fmt.Fprintf(localConn, "-ERR No such message\r\n")
+				continue
+			}
+
+			lines, err := strconv.Atoi(parts[2])
+			if err != nil || lines < 0 {
+				fmt.Fprintf(localConn, "-ERR Invalid line count\r\n")
+				continue
+			}
+
+			// Fetch message headers and body from IMAP
+			imapTag++
+			fetchCmd := fmt.Sprintf("A%d FETCH %d (RFC822)\r\n", imapTag, msgNum)
+			fmt.Fprintf(upstreamConn, fetchCmd)
+			log.Printf("[POP3] PROXY -> IMAP-SERVER (%s): A%d FETCH %d (RFC822) for TOP %d lines", clientAddr, imapTag, msgNum, lines)
+
+			fmt.Fprintf(localConn, "+OK Top of message follows\r\n")
+
+			// Read and forward IMAP FETCH response with line limiting
+			inMessage := false
+			headersDone := false
+			bodyLines := 0
+			for scanner.Scan() {
+				response := scanner.Text()
+				log.Printf("[POP3] IMAP-SERVER -> PROXY (%s): %s", clientAddr, response)
+
+				if strings.Contains(response, "RFC822") {
+					inMessage = true
+					continue
+				}
+
+				if inMessage {
+					if strings.HasPrefix(response, fmt.Sprintf("A%d OK", imapTag)) {
+						break
+					} else if strings.HasPrefix(response, ")") {
+						continue
+					} else {
+						// Check if we've reached the end of headers
+						if !headersDone && response == "" {
+							headersDone = true
+							fmt.Fprintf(localConn, "\r\n")
+							continue
+						}
+
+						// Always send headers
+						if !headersDone {
+							fmt.Fprintf(localConn, "%s\r\n", response)
+						} else {
+							// Only send specified number of body lines
+							if bodyLines < lines {
+								fmt.Fprintf(localConn, "%s\r\n", response)
+								bodyLines++
+							} else {
+								// Skip remaining body lines
+								continue
+							}
+						}
+					}
+				}
+			}
+
+			fmt.Fprintf(localConn, ".\r\n")
+			log.Printf("[POP3] PROXY -> CLIENT (%s): TOP of message %d delivered (%d body lines)", clientAddr, msgNum, lines)
+
+		case "DELE":
+			if pop3State != "TRANSACTION" {
+				fmt.Fprintf(localConn, "-ERR Command not valid in this state\r\n")
+				continue
+			}
+
+			if len(parts) != 2 {
+				fmt.Fprintf(localConn, "-ERR Invalid syntax\r\n")
+				continue
+			}
+
+			msgNum, err := strconv.Atoi(parts[1])
+			if err != nil || msgNum < 1 || msgNum > messageCount {
+				fmt.Fprintf(localConn, "-ERR No such message\r\n")
+				continue
+			}
+
+			// Mark message for deletion in IMAP
+			imapTag++
+			storeCmd := fmt.Sprintf("A%d STORE %d +FLAGS (\\Deleted)\r\n", imapTag, msgNum)
+			fmt.Fprintf(upstreamConn, storeCmd)
+			log.Printf("[POP3] PROXY -> IMAP-SERVER (%s): A%d STORE %d +FLAGS (\\Deleted)", clientAddr, imapTag, msgNum)
+
+			// Read IMAP response
+			for scanner.Scan() {
+				response := scanner.Text()
+				log.Printf("[POP3] IMAP-SERVER -> PROXY (%s): %s", clientAddr, response)
+				if strings.HasPrefix(response, fmt.Sprintf("A%d OK", imapTag)) {
+					break
+				}
+			}
+
+			fmt.Fprintf(localConn, "+OK Message %d deleted\r\n", msgNum)
+			log.Printf("[POP3] PROXY -> CLIENT (%s): +OK Message %d deleted", clientAddr, msgNum)
+
+		case "NOOP":
+			fmt.Fprintf(localConn, "+OK\r\n")
+			log.Printf("[POP3] PROXY -> CLIENT (%s): +OK", clientAddr)
+
+		case "RSET":
+			if pop3State != "TRANSACTION" {
+				fmt.Fprintf(localConn, "-ERR Command not valid in this state\r\n")
+				continue
+			}
+
+			// Remove all deletion marks in IMAP
+			imapTag++
+			storeCmd := fmt.Sprintf("A%d STORE 1:%d -FLAGS (\\Deleted)\r\n", imapTag, messageCount)
+			fmt.Fprintf(upstreamConn, storeCmd)
+			log.Printf("[POP3] PROXY -> IMAP-SERVER (%s): A%d STORE 1:%d -FLAGS (\\Deleted)", clientAddr, imapTag, messageCount)
+
+			// Read IMAP response
+			for scanner.Scan() {
+				response := scanner.Text()
+				log.Printf("[POP3] IMAP-SERVER -> PROXY (%s): %s", clientAddr, response)
+				if strings.HasPrefix(response, fmt.Sprintf("A%d OK", imapTag)) {
+					break
+				}
+			}
+
+			fmt.Fprintf(localConn, "+OK\r\n")
+			log.Printf("[POP3] PROXY -> CLIENT (%s): +OK Reset completed", clientAddr)
+
+		case "QUIT":
+			if pop3State == "TRANSACTION" {
+				// Expunge deleted messages in IMAP
+				imapTag++
+				expungeCmd := fmt.Sprintf("A%d EXPUNGE\r\n", imapTag)
+				fmt.Fprintf(upstreamConn, expungeCmd)
+				log.Printf("[POP3] PROXY -> IMAP-SERVER (%s): A%d EXPUNGE", clientAddr, imapTag)
+
+				// Read IMAP response
+				for scanner.Scan() {
+					response := scanner.Text()
+					log.Printf("[POP3] IMAP-SERVER -> PROXY (%s): %s", clientAddr, response)
+					if strings.HasPrefix(response, fmt.Sprintf("A%d OK", imapTag)) {
+						break
+					}
+				}
+			}
+
+			// Logout from IMAP
+			imapTag++
+			logoutCmd := fmt.Sprintf("A%d LOGOUT\r\n", imapTag)
+			fmt.Fprintf(upstreamConn, logoutCmd)
+			log.Printf("[POP3] PROXY -> IMAP-SERVER (%s): A%d LOGOUT", clientAddr, imapTag)
+
+			fmt.Fprintf(localConn, "+OK Goodbye\r\n")
+			log.Printf("[POP3] PROXY -> CLIENT (%s): +OK Goodbye", clientAddr)
+			return
+
+		default:
+			fmt.Fprintf(localConn, "-ERR Unknown command\r\n")
+			log.Printf("[POP3] PROXY -> CLIENT (%s): -ERR Unknown command: %s", clientAddr, command)
+		}
+	}
+
+	log.Printf("[POP3] Client %s disconnected from IMAP mailbox %s", clientAddr, upstreamConfig.Username)
+}
+

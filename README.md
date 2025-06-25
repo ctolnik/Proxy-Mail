@@ -1,19 +1,32 @@
 # Proxy-Mail
 
-A Go-based email proxy service that bridges insecure legacy email clients with modern secure email providers. This service allows you to:
+A Go-based email proxy service designed specifically for **legacy email clients** that only support basic POP3/SMTP protocols. This service bridges insecure legacy clients with modern secure email providers.
 
-- Receive mail via POP3/IMAP from encrypted upstream servers and serve it locally without encryption
-- Send mail via SMTP to encrypted upstream servers from local unencrypted clients
-- Handle multiple mailboxes from different or same email providers
-- Automatically handle authentication with upstream servers
+## Key Features
 
-## Features
-
-- **Protocol Support**: POP3, IMAP4, and SMTP proxying
-- **Security**: Handles TLS/SSL connections to upstream servers while providing unencrypted local access
-- **Multi-mailbox**: Support for multiple email accounts on same or different providers
-- **YAML Configuration**: Easy configuration via YAML files
+- **Legacy Client Support**: Provides both POP3 and SMTP access for old email clients that can't handle modern security
+- **Protocol Translation**: Automatically translates between POP3 (client) and POP3/IMAP (server)
+- **Dual Protocol Support**: Supports both incoming mail (POP3/IMAP) and outgoing mail (SMTP)
+- **Upstream Flexibility**: Can connect to upstream servers using POP3, IMAP, or SMTP protocols
+- **Security Bridge**: Handles TLS/SSL upstream while providing unencrypted local POP3/SMTP
+- **Multi-mailbox**: Support for multiple email accounts from different providers
 - **Transparent Authentication**: Automatically handles authentication with upstream servers
+- **Enhanced Logging**: Detailed logging of all operations and protocol translations
+
+## Architecture
+
+```
+Legacy Client ----[POP3/SMTP Unencrypted]----> Proxy-Mail ----[POP3/IMAP/SMTP + TLS]----> Mail Provider
+(Port 110/25)                                                                            (Gmail, Outlook, etc)
+```
+
+### Protocol Support
+
+- **Local (Client-facing)**: POP3 (port 110) and SMTP (port 25/587), both unencrypted
+- **Upstream (Server-facing)**: POP3, IMAP, and SMTP (with TLS/SSL support)
+- **Automatic Fallback**: For incoming mail, prefers POP3 upstream, falls back to IMAP if POP3 unavailable
+- **Protocol Translation**: POP3 client commands → IMAP server commands (when needed)
+- **Transparent Authentication**: Handles authentication for both incoming (POP3/IMAP) and outgoing (SMTP) mail
 
 ## Quick Start
 
@@ -29,10 +42,10 @@ A Go-based email proxy service that bridges insecure legacy email clients with m
    ./proxy-mail -config config.yaml
    ```
 
-4. **Configure your email client** to connect to:
-   - POP3: `localhost:110` (unencrypted)
-   - IMAP: `localhost:143` (unencrypted)
-   - SMTP: `localhost:25` (unencrypted)
+4. **Configure your legacy email client** to connect to:
+   - **Incoming (POP3)**: `localhost:110` (unencrypted)
+   - **Outgoing (SMTP)**: `localhost:25` (unencrypted) 
+   - Use any username/password (will be ignored)
 
 ## Configuration
 
@@ -41,18 +54,21 @@ A Go-based email proxy service that bridges insecure legacy email clients with m
 ```yaml
 servers:
   - name: "account-name"
+    # Configure POP3 upstream (preferred)
     pop3:
       host: "pop.provider.com"
       port: 995
       use_tls: true
       username: "your-email@provider.com"
       password: "your-password"
+    # Optional: Configure IMAP upstream (fallback)
     imap:
       host: "imap.provider.com"
       port: 993
       use_tls: true
       username: "your-email@provider.com"
       password: "your-password"
+    # Optional: Configure SMTP upstream (for outgoing mail)
     smtp:
       host: "smtp.provider.com"
       port: 587
@@ -60,249 +76,261 @@ servers:
       username: "your-email@provider.com"
       password: "your-password"
 
+# Local servers for legacy clients
 local:
   pop3:
-    host: "0.0.0.0"
-    port: 110
-    use_tls: false
-  imap:
-    host: "0.0.0.0"
-    port: 143
-    use_tls: false
+    host: "0.0.0.0"  # Listen on all interfaces  
+    port: 110         # Standard POP3 port
+    use_tls: false    # No encryption for legacy clients
   smtp:
-    host: "0.0.0.0"
-    port: 25
-    use_tls: false
+    host: "0.0.0.0"  # Listen on all interfaces
+    port: 25          # Standard SMTP port (or use 587, 2525)
+    use_tls: false    # No encryption for legacy clients
 ```
+
+### Protocol Selection Logic
+
+1. **POP3 Preferred**: If `pop3` is configured, proxy uses POP3 → POP3
+2. **IMAP Fallback**: If only `imap` is configured, proxy translates POP3 → IMAP
+3. **Both Configured**: POP3 takes precedence, IMAP is ignored
+4. **Neither Configured**: Connection fails with error
 
 ### Multiple Mailboxes on Same Server
 
-For multiple mailboxes on the same email provider, create separate server entries:
+For multiple mailboxes on the same email provider, you have two options:
 
-```yaml
-servers:
-  # First Gmail account
-  - name: "personal-gmail"
-    pop3:
-      host: "pop.gmail.com"
-      port: 995
-      use_tls: true
-      username: "personal@gmail.com"
-      password: "app-password-1"
-    imap:
-      host: "imap.gmail.com"
-      port: 993
-      use_tls: true
-      username: "personal@gmail.com"
-      password: "app-password-1"
-    smtp:
-      host: "smtp.gmail.com"
-      port: 587
-      use_tls: true
-      username: "personal@gmail.com"
-      password: "app-password-1"
+#### Option 1: Multiple Proxy Instances (Recommended)
 
-  # Second Gmail account
-  - name: "work-gmail"
-    pop3:
-      host: "pop.gmail.com"
-      port: 995
-      use_tls: true
-      username: "work@gmail.com"
-      password: "app-password-2"
-    imap:
-      host: "imap.gmail.com"
-      port: 993
-      use_tls: true
-      username: "work@gmail.com"
-      password: "app-password-2"
-    smtp:
-      host: "smtp.gmail.com"
-      port: 587
-      use_tls: true
-      username: "work@gmail.com"
-      password: "app-password-2"
-
-  # Different provider
-  - name: "business-outlook"
-    pop3:
-      host: "outlook.office365.com"
-      port: 995
-      use_tls: true
-      username: "business@company.com"
-      password: "outlook-password"
-    # ... similar for imap and smtp
-```
-
-### Running Multiple Proxy Instances
-
-For handling multiple mailboxes with separate local ports, create different configuration files:
+Create separate configuration files for each mailbox:
 
 **config-personal.yaml**:
 ```yaml
 servers:
   - name: "personal-gmail"
-    # ... personal account config
+    pop3:  # Preferred upstream protocol
+      host: "pop.gmail.com"
+      port: 995
+      use_tls: true
+      username: "personal@gmail.com"
+      password: "app-password-1"
+    imap:  # Fallback upstream protocol
+      host: "imap.gmail.com"
+      port: 993
+      use_tls: true
+      username: "personal@gmail.com"
+      password: "app-password-1"
 
 local:
   pop3:
     host: "0.0.0.0"
-    port: 1110  # Different port
-  imap:
-    host: "0.0.0.0"
-    port: 1143  # Different port
-  smtp:
-    host: "0.0.0.0"
-    port: 1025  # Different port
+    port: 1110  # Custom port for personal account
 ```
 
 **config-work.yaml**:
 ```yaml
 servers:
   - name: "work-gmail"
-    # ... work account config
+    imap:  # IMAP-only upstream (will use POP3->IMAP translation)
+      host: "imap.gmail.com"
+      port: 993
+      use_tls: true
+      username: "work@gmail.com"
+      password: "app-password-2"
 
 local:
   pop3:
     host: "0.0.0.0"
-    port: 2110  # Different port
-  imap:
-    host: "0.0.0.0"
-    port: 2143  # Different port
-  smtp:
-    host: "0.0.0.0"
-    port: 2025  # Different port
+    port: 2110  # Custom port for work account
 ```
 
 Then run multiple instances:
 ```bash
-./proxy-mail -config config-personal.yaml &
-./proxy-mail -config config-work.yaml &
+./proxy-mail -config config-personal.yaml &  # POP3->POP3
+./proxy-mail -config config-work.yaml &     # POP3->IMAP
 ```
 
-## Email Client Configuration
+#### Option 2: Single Instance (First Account Only)
+
+```yaml
+servers:
+  - name: "personal-gmail"    # This account will be used
+    pop3:
+      host: "pop.gmail.com"
+      port: 995
+      use_tls: true
+      username: "personal@gmail.com"
+      password: "app-password-1"
+  
+  - name: "work-gmail"        # This account will be ignored
+    imap:
+      host: "imap.gmail.com"
+      port: 993
+      use_tls: true
+      username: "work@gmail.com"
+      password: "app-password-2"
+
+local:
+  pop3:
+    port: 110
+```
+
+**Note**: Only the first configured account will be used in single-instance mode.
+
+### Legacy Email Client Examples
+
+Configure your legacy email client to connect to the proxy:
+
+#### For Single Instance (Default Port)
+- **Incoming Server**: `localhost`
+- **Port**: `110`
+- **Security**: `None` or `No Encryption`
+- **Authentication**: `Normal Password`
+- **Username**: `any` (ignored)
+- **Password**: `any` (ignored)
+
+#### For Multiple Instances (Custom Ports)
+- **Personal Account**: `localhost:1110`
+- **Work Account**: `localhost:2110`
+- **Business Account**: `localhost:3110`
+- (Same security settings as above)
+
+## Legacy Email Client Configuration
 
 ### Thunderbird Example
 
 1. **Add New Account**:
-   - Email: `your-email@provider.com`
+   - Email: `any@example.com` (will be ignored)
    - Password: `any-password` (will be ignored)
 
 2. **Manual Configuration**:
-   - **Incoming Server (IMAP)**:
-     - Server: `localhost`
-     - Port: `143`
-     - Security: `None`
-     - Authentication: `Normal password`
-   
-   - **Incoming Server (POP3)**:
+   - **Incoming Server (POP3 ONLY)**:
      - Server: `localhost`
      - Port: `110`
      - Security: `None`
      - Authentication: `Normal password`
    
-   - **Outgoing Server (SMTP)**:
-     - Server: `localhost`
-     - Port: `25`
-     - Security: `None`
-     - Authentication: `Normal password`
+   - **Outgoing Server**: Not supported in current version
 
-### Outlook Example
+### Outlook Express / Windows Mail Example
 
-1. **File → Add Account → Manual setup**
-2. **POP or IMAP**:
+1. **Add Account → Manual setup**
+2. **POP3 Configuration**:
    - **Incoming mail server**: `localhost`
-   - **Port**: `143` (IMAP) or `110` (POP3)
-   - **Encryption**: `None`
-   - **Outgoing mail server**: `localhost`
-   - **Port**: `25`
-   - **Encryption**: `None`
+   - **Port**: `110`
+   - **Security**: `None`
+   - **Username**: `any` (ignored)
+   - **Password**: `any` (ignored)
+
+### Generic Legacy Client
+
+- **Protocol**: POP3
+- **Server**: `localhost` (or IP address of proxy server)
+- **Port**: `110` (or custom port if using multiple instances)
+- **Encryption**: None/Disabled
+- **Authentication**: Normal/Plain
+- **Username/Password**: Any values (completely ignored)
 
 ## Provider-Specific Settings
 
-### Gmail
+### Gmail (Recommended: POP3 + IMAP Fallback)
 ```yaml
 servers:
   - name: "gmail-account"
-    pop3:
+    pop3:  # Primary - Direct POP3 connection
       host: "pop.gmail.com"
       port: 995
       use_tls: true
-    imap:
+      username: "your-email@gmail.com"
+      password: "your-app-password"
+    imap:  # Fallback - POP3->IMAP translation
       host: "imap.gmail.com"
       port: 993
       use_tls: true
-    smtp:
-      host: "smtp.gmail.com"
-      port: 587  # or 465 for SSL
+      username: "your-email@gmail.com"
+      password: "your-app-password"
+```
+
+### Gmail (IMAP-only with Translation)
+```yaml
+servers:
+  - name: "gmail-imap-only"
+    imap:  # Will use POP3->IMAP translation
+      host: "imap.gmail.com"
+      port: 993
       use_tls: true
+      username: "your-email@gmail.com"
+      password: "your-app-password"
 ```
 
 ### Outlook/Hotmail
 ```yaml
 servers:
   - name: "outlook-account"
-    pop3:
+    pop3:  # Primary
       host: "outlook.office365.com"
       port: 995
       use_tls: true
-    imap:
+      username: "your-email@outlook.com"
+      password: "your-password"
+    imap:  # Fallback
       host: "outlook.office365.com"
       port: 993
       use_tls: true
-    smtp:
-      host: "smtp-mail.outlook.com"
-      port: 587
-      use_tls: true
+      username: "your-email@outlook.com"
+      password: "your-password"
 ```
 
 ### Yahoo
 ```yaml
 servers:
   - name: "yahoo-account"
-    pop3:
+    pop3:  # Primary
       host: "pop.mail.yahoo.com"
       port: 995
       use_tls: true
-    imap:
+      username: "your-email@yahoo.com"
+      password: "your-app-password"
+    imap:  # Fallback
       host: "imap.mail.yahoo.com"
       port: 993
       use_tls: true
-    smtp:
-      host: "smtp.mail.yahoo.com"
-      port: 587
-      use_tls: true
+      username: "your-email@yahoo.com"
+      password: "your-app-password"
 ```
 
 ### Yandex
 ```yaml
 servers:
   - name: "yandex-account"
-    pop3:
+    pop3:  # Primary
       host: "pop.yandex.com"
       port: 995
       use_tls: true
-    imap:
+      username: "your-email@yandex.com"
+      password: "your-password"
+    imap:  # Fallback
       host: "imap.yandex.com"
       port: 993
       use_tls: true
-    smtp:
-      host: "smtp.yandex.com"
-      port: 587
-      use_tls: true
+      username: "your-email@yandex.com"
+      password: "your-password"
 ```
 
 ## Security Considerations
 
 ⚠️ **Important Security Notes**:
 
-1. **Local Network Only**: This proxy is designed for local network use only. Never expose the unencrypted ports to the internet.
+1. **Local Network Only**: This proxy is designed for local network use only. Never expose port 110 to the internet.
 
 2. **App Passwords**: For Gmail and many other providers, use app-specific passwords instead of your main account password.
 
-3. **Firewall**: Ensure your firewall blocks external access to the proxy ports (25, 110, 143).
+3. **Firewall**: Ensure your firewall blocks external access to proxy port 110 (and custom ports if using multiple instances).
 
 4. **Network**: Only use on trusted local networks.
+
+5. **Legacy Clients Only**: This service is specifically designed for legacy email clients that cannot handle modern security protocols.
+
+6. **Read-Only**: Current implementation is optimized for reading email. Sending capabilities are not implemented.
 
 ## Troubleshooting
 
@@ -321,6 +349,12 @@ servers:
 3. **TLS Errors**:
    - Verify `use_tls` settings match provider requirements
    - Check port numbers (993/995 for TLS, 143/110 for plain)
+   - Ensure upstream server supports the configured protocol (POP3 or IMAP)
+
+4. **Protocol Issues**:
+   - If POP3 connection fails, check if IMAP is configured as fallback
+   - For Gmail: POP3 may be disabled, use IMAP-only configuration
+   - Check logs for "POP3->IMAP translation" messages
 
 ### Advanced Logging Options
 

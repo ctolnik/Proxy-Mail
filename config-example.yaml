@@ -86,19 +86,16 @@ servers:
       username: "username@yandex.com"
       password: "your-yandex-password"
 
-# Local server settings (what your email client connects to)
+# Local server settings (what your legacy email client connects to)
+# Both POP3 and SMTP are supported for local connections - this is for legacy clients
 local:
   pop3:
     host: "0.0.0.0"  # Listen on all interfaces
     port: 110         # Standard POP3 port
     use_tls: false    # No encryption for local connections
-  imap:
-    host: "0.0.0.0"  # Listen on all interfaces
-    port: 143         # Standard IMAP port
-    use_tls: false    # No encryption for local connections
   smtp:
     host: "0.0.0.0"  # Listen on all interfaces
-    port: 25          # Standard SMTP port
+    port: 25          # Standard SMTP port (or use 587, 2525 for alternatives)
     use_tls: false    # No encryption for local connections
 
 # Notes:
@@ -106,6 +103,10 @@ local:
 # 2. Enable 2-Factor Authentication in Gmail first
 # 3. Generate App Password: Google Account → Security → 2-Step Verification → App passwords
 # 4. The proxy will automatically handle authentication with upstream servers
-# 5. Configure your email client to connect to localhost with the ports above
+# 5. Configure your legacy email client to use POP3 only:
+#    - Server: localhost, Port: 110, Security: None
 # 6. Use any username/password in your email client - they will be ignored
+# 7. The proxy can connect to upstream servers using either POP3 or IMAP
+# 8. If both POP3 and IMAP are configured, POP3 takes preference
+# 9. If only IMAP is configured, the proxy will translate POP3 <-> IMAP
 

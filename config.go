@@ -23,9 +23,10 @@ type MailServerConfig struct {
 }
 
 type LocalConfig struct {
-	POP3 MailServerConfig `yaml:"pop3"`
-	IMAP MailServerConfig `yaml:"imap"`
-	SMTP MailServerConfig `yaml:"smtp"`
+	POP3 MailServerConfig  `yaml:"pop3"`
+	SMTP *MailServerConfig `yaml:"smtp,omitempty"`
+	// Note: POP3 and SMTP are supported for local connections (legacy clients)
+	// IMAP is only used for upstream connections
 }
 
 type Config struct {
