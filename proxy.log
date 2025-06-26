@@ -1,0 +1,40 @@
+2025/06/26 02:37:13 [INFO] Proxy-Mail starting with log level: debug
+2025/06/26 02:37:13 Started POP3 proxy server on port 110
+2025/06/26 02:37:13 Started SMTP proxy server on port 25
+2025/06/26 02:37:13 Proxy-Mail service supports:
+2025/06/26 02:37:13   - Local POP3 server for legacy clients (incoming mail)
+2025/06/26 02:37:13   - Local SMTP server for legacy clients (outgoing mail)
+2025/06/26 02:37:13   - Upstream POP3, IMAP, and SMTP connections
+2025/06/26 02:37:13   - Automatic protocol translation (POP3 client <-> IMAP server)
+2025/06/26 02:37:13   - Transparent authentication for both incoming and outgoing mail
+2025/06/26 02:37:13 Email proxy service started successfully
+2025/06/26 02:37:13 [SMTP] Proxy server listening on 0.0.0.0:25
+2025/06/26 02:37:13 [INFO] POP3 proxy server listening on 0.0.0.0:110
+2025/06/26 02:37:21 [INFO] POP3 client connected from [::1]:51137
+2025/06/26 02:37:21 [INFO] POP3: Client connected, waiting for credentials
+2025/06/26 02:37:21 [DEBUG] POP3 CLIENT -e PROXY ([::1]:51137): USER lawoffice.gsl@gmail.com
+2025/06/26 02:37:21 [INFO] POP3 user lawoffice.gsl@gmail.com accepted from client [::1]:51137
+2025/06/26 02:37:21 [DEBUG] POP3 CLIENT -e PROXY ([::1]:51137): PASS test
+2025/06/26 02:37:21 [INFO] POP3 Using mailbox lawoffice.gsl@gmail.com (IMAP) for user lawoffice.gsl@gmail.com
+2025/06/26 02:37:21 [INFO] POP3 Connecting to upstream IMAP server imap.gmail.com:993 for mailbox lawoffice.gsl@gmail.com
+2025/06/26 02:37:21 [INFO] POP3 Successfully connected to upstream IMAP server for mailbox lawoffice.gsl@gmail.com
+2025/06/26 02:37:21 [POP3] Starting POP3-to-IMAP translation for client [::1]:51137
+2025/06/26 02:37:21 [DEBUG] POP3 IMAP-SERVER -> PROXY ([::1]:51137): * OK Gimap ready for requests from 46.150.174.44 ei9mb5218122ltb
+2025/06/26 02:37:21 [POP3] PROXY -> CLIENT ([::1]:51137): +OK POP3 server ready (IMAP backend)
+2025/06/26 02:37:21 [POP3] Client [::1]:51137 disconnected: EOF
+2025/06/26 02:37:21 [POP3] Client [::1]:51137 disconnected from IMAP mailbox lawoffice.gsl@gmail.com
+2025/06/26 02:43:28 [INFO] POP3 client connected from [::1]:51504
+2025/06/26 02:43:28 [INFO] POP3: Client connected, waiting for credentials
+2025/06/26 02:43:28 [DEBUG] POP3 CLIENT -e PROXY ([::1]:51504): USER lawoffice.gsl@gmail.com
+2025/06/26 02:43:28 [INFO] POP3 user lawoffice.gsl@gmail.com accepted from client [::1]:51504
+2025/06/26 02:43:28 [DEBUG] POP3 CLIENT -e PROXY ([::1]:51504): PASS test
+2025/06/26 02:43:28 [INFO] POP3 Using mailbox lawoffice.gsl@gmail.com (IMAP) for user lawoffice.gsl@gmail.com
+2025/06/26 02:43:28 [INFO] POP3 Connecting to upstream IMAP server imap.gmail.com:993 for mailbox lawoffice.gsl@gmail.com
+2025/06/26 02:43:28 [INFO] POP3 Successfully connected to upstream IMAP server for mailbox lawoffice.gsl@gmail.com
+2025/06/26 02:43:28 [POP3] Starting POP3-to-IMAP translation for client [::1]:51504
+2025/06/26 02:43:28 [DEBUG] POP3 IMAP-SERVER -> PROXY ([::1]:51504): * OK Gimap ready for requests from 46.150.174.44 2adb3069b0e04-553a72fa80dmb5372634e87
+2025/06/26 02:43:28 [POP3] PROXY -> CLIENT ([::1]:51504): +OK POP3 server ready (IMAP backend)
+2025/06/26 02:43:28 [POP3] Client [::1]:51504 disconnected: EOF
+2025/06/26 02:43:28 [POP3] Client [::1]:51504 disconnected from IMAP mailbox lawoffice.gsl@gmail.com
+2025/06/26 02:47:30 Shutting down email proxy service...
+2025/06/26 02:47:30 Email proxy service stopped

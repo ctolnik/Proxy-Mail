@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 )
@@ -16,8 +17,13 @@ func main() {
 	// Load configuration
 	cfg, err := LoadConfig(*configPath)
 	if err != nil {
+		LogError("Failed to load configuration: %v", err)
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+
+	// Set log level from config
+	SetLogLevel(cfg.LogLevel)
+	LogInfo("Proxy-Mail starting with log level: %s", strings.ToLower(cfg.LogLevel))
 
 	// Create proxy service
 	proxyService := NewProxyService(cfg)

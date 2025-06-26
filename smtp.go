@@ -66,56 +66,99 @@ func (s *SMTPServer) handleConnection(localConn net.Conn) {
 	defer localConn.Close()
 
 	clientAddr := localConn.RemoteAddr().String()
-	log.Printf("[SMTP] Client connected from %s", clientAddr)
+	LogInfo("SMTP client connected from %s", clientAddr)
 
-	// Get the first available SMTP server config
-	serverConfig := s.config.GetServerByProtocol("smtp")
-	if serverConfig == nil || serverConfig.SMTP == nil {
-		log.Printf("[SMTP] ERROR: No SMTP server configuration found for client %s", clientAddr)
-		fmt.Fprintf(localConn, "421 No SMTP server configured\r\n")
-		return
-	}
+	// Send initial greeting to client
+	fmt.Fprintf(localConn, "220 Proxy-Mail SMTP Ready\r\n")
+	LogDebug("SMTP sent greeting to client %s", clientAddr)
 
-	log.Printf("[SMTP] Using server config '%s' for client %s", serverConfig.Name, clientAddr)
+	// Handle commands until we get MAIL FROM to determine which mailbox to use
+	s.handleSMTPSessionDynamic(localConn, clientAddr)
+}
 
-	// Connect to upstream SMTP server
-	upstreamAddr := fmt.Sprintf("%s:%d", serverConfig.SMTP.Host, serverConfig.SMTP.Port)
+// handleSMTPSessionDynamic handles SMTP session with dynamic mailbox selection
+func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr string) {
+	clientReader := bufio.NewReader(localConn)
+	var selectedMailbox string
 	var upstreamConn net.Conn
-	var err error
+	var serverConfig *ServerConfig
+	var isConnectedToUpstream bool
 
-	log.Printf("[SMTP] Connecting to upstream SMTP server %s (TLS: %v) for mailbox %s", upstreamAddr, serverConfig.SMTP.UseTLS, serverConfig.SMTP.Username)
-
-	// For port 587, always start with plain connection (STARTTLS)
-	// For port 465, use direct TLS connection
-	if serverConfig.SMTP.Port == 465 && serverConfig.SMTP.UseTLS {
-		upstreamConn, err = tls.Dial("tcp", upstreamAddr, &tls.Config{ServerName: serverConfig.SMTP.Host})
-	} else {
-		upstreamConn, err = net.Dial("tcp", upstreamAddr)
-	}
-
-	if err != nil {
-		log.Printf("[SMTP] ERROR: Failed to connect to upstream SMTP server %s for mailbox %s: %v", upstreamAddr, serverConfig.SMTP.Username, err)
-		fmt.Fprintf(localConn, "421 Cannot connect to mail server\r\n")
-		return
-	}
-	defer upstreamConn.Close()
-
-	log.Printf("[SMTP] Successfully connected to upstream SMTP server %s for mailbox %s", upstreamAddr, serverConfig.SMTP.Username)
-
-	// Handle STARTTLS upgrade if needed (port 587)
-	if serverConfig.SMTP.Port == 587 && serverConfig.SMTP.UseTLS {
-		upstreamConn, err = s.upgradeToSTARTTLS(upstreamConn, serverConfig.SMTP, clientAddr)
+	for {
+		// Read line from client
+		lineBytes, err := clientReader.ReadBytes('\n')
 		if err != nil {
-			log.Printf("[SMTP] ERROR: STARTTLS upgrade failed for %s: %v", serverConfig.SMTP.Username, err)
-			fmt.Fprintf(localConn, "421 TLS upgrade failed\r\n")
+			LogDebug("SMTP client %s disconnected: %v", clientAddr, err)
+			break
+		}
+
+		line := strings.TrimSpace(string(lineBytes))
+		if line == "" {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		command := ""
+		if len(fields) > 0 {
+			command = strings.ToUpper(fields[0])
+		}
+
+		LogDebug("SMTP CLIENT -> PROXY (%s): %s", clientAddr, line)
+
+		// Handle MAIL FROM command to determine which mailbox to use
+		if command == "MAIL" && strings.Contains(strings.ToUpper(line), "FROM:") {
+			// Extract sender email from MAIL FROM command
+			senderEmail := s.extractEmailFromMailFrom(line)
+			LogInfo("SMTP selecting mailbox for sender: %s", senderEmail)
+
+			// Find matching server config for this sender
+			serverConfig = s.findServerConfigBySender(senderEmail)
+			if serverConfig == nil {
+				LogError("No SMTP server configuration found for sender: %s", senderEmail)
+				fmt.Fprintf(localConn, "550 No mailbox configured for sender\r\n")
+				continue
+			}
+
+			selectedMailbox = serverConfig.SMTP.Username
+			LogInfo("SMTP using mailbox: %s for sender: %s", selectedMailbox, senderEmail)
+
+			// Connect to upstream SMTP server for this mailbox
+			upstreamConn, err = s.connectToUpstream(serverConfig, clientAddr)
+			if err != nil {
+				LogError("Failed to connect to upstream SMTP for %s: %v", selectedMailbox, err)
+				fmt.Fprintf(localConn, "421 Cannot connect to mail server\r\n")
+				continue
+			}
+			isConnectedToUpstream = true
+
+			// Start normal SMTP session with the selected upstream
+			defer upstreamConn.Close()
+			s.handleSMTPSession(localConn, upstreamConn, serverConfig.SMTP, clientAddr)
 			return
+		}
+
+		// Handle other commands before mailbox selection
+		switch command {
+		case "EHLO", "HELO":
+			fmt.Fprintf(localConn, "250-Proxy-Mail SMTP Ready\r\n")
+			fmt.Fprintf(localConn, "250-AUTH LOGIN\r\n")
+			fmt.Fprintf(localConn, "250 STARTTLS\r\n")
+			LogDebug("SMTP sent EHLO response to client %s", clientAddr)
+
+		case "QUIT":
+			fmt.Fprintf(localConn, "221 Goodbye\r\n")
+			LogDebug("SMTP client %s quit", clientAddr)
+			return
+
+		default:
+			fmt.Fprintf(localConn, "503 Need MAIL FROM first\r\n")
+			LogDebug("SMTP client %s sent command before MAIL FROM: %s", clientAddr, command)
 		}
 	}
 
-	// Start SMTP session handling
-	// Note: For STARTTLS connections, we skip reading the initial greeting since it was already consumed
-	skipGreeting := serverConfig.SMTP.Port == 587 && serverConfig.SMTP.UseTLS
-	s.handleSMTPSessionWithOptions(localConn, upstreamConn, serverConfig.SMTP, clientAddr, skipGreeting)
+	if isConnectedToUpstream {
+		upstreamConn.Close()
+	}
 }
 
 func (s *SMTPServer) handleSMTPSessionWithOptions(localConn, upstreamConn net.Conn, upstreamConfig *MailServerConfig, clientAddr string, skipGreeting bool) {
@@ -224,6 +267,32 @@ func (s *SMTPServer) handleSMTPCommands(localConn, upstreamConn net.Conn, upstre
 				if len(response) >= 4 && response[3] == ' ' {
 					break
 				}
+			}
+
+		case "MAIL":
+			// For MAIL FROM, preserve the original sender address
+			// but authenticate using the proxy credentials
+			log.Printf("[SMTP] Preserving original sender: %s", line)
+			fmt.Fprintf(upstreamConn, "%s\r\n", line)
+			log.Printf("[SMTP] PROXY -> UPSTREAM (%s): %s (original sender preserved)", clientAddr, line)
+
+			if upstreamScanner.Scan() {
+				response := upstreamScanner.Text()
+				log.Printf("[SMTP] UPSTREAM -> PROXY (%s): %s", clientAddr, response)
+				fmt.Fprintf(localConn, "%s\r\n", response)
+				log.Printf("[SMTP] PROXY -> CLIENT (%s): %s", clientAddr, response)
+			}
+
+		case "RCPT":
+			// Forward RCPT TO commands as-is
+			fmt.Fprintf(upstreamConn, "%s\r\n", line)
+			log.Printf("[SMTP] PROXY -> UPSTREAM (%s): %s", clientAddr, line)
+
+			if upstreamScanner.Scan() {
+				response := upstreamScanner.Text()
+				log.Printf("[SMTP] UPSTREAM -> PROXY (%s): %s", clientAddr, response)
+				fmt.Fprintf(localConn, "%s\r\n", response)
+				log.Printf("[SMTP] PROXY -> CLIENT (%s): %s", clientAddr, response)
 			}
 
 		case "AUTH":
@@ -426,4 +495,83 @@ func (s *SMTPServer) upgradeToSTARTTLS(conn net.Conn, config *MailServerConfig, 
 
 	log.Printf("[SMTP] STARTTLS upgrade successful (%s)", clientAddr)
 	return tlsConn, nil
+}
+
+// extractEmailFromMailFrom extracts email address from MAIL FROM command
+func (s *SMTPServer) extractEmailFromMailFrom(line string) string {
+	// Extract email from "MAIL FROM:<email@domain.com>"
+	start := strings.Index(strings.ToUpper(line), "FROM:")
+	if start == -1 {
+		return ""
+	}
+	
+	remainder := line[start+5:] // Skip "FROM:"
+	remainder = strings.TrimSpace(remainder)
+	
+	// Remove angle brackets if present
+	if strings.HasPrefix(remainder, "<") && strings.HasSuffix(remainder, ">") {
+		return remainder[1 : len(remainder)-1]
+	}
+	
+	// Take first word (email address)
+	fields := strings.Fields(remainder)
+	if len(fields) > 0 {
+		return fields[0]
+	}
+	
+	return remainder
+}
+
+// findServerConfigBySender finds server config that matches the sender email
+func (s *SMTPServer) findServerConfigBySender(senderEmail string) *ServerConfig {
+	// First, try exact match
+	for _, server := range s.config.Servers {
+		if server.SMTP != nil && server.SMTP.Username == senderEmail {
+			return &server
+		}
+	}
+	
+	// If no exact match, return the first available SMTP server
+	// This allows sending from any address using any configured mailbox
+	for _, server := range s.config.Servers {
+		if server.SMTP != nil {
+			LogInfo("SMTP fallback: Using mailbox %s for sender %s", server.SMTP.Username, senderEmail)
+			return &server
+		}
+	}
+	
+	return nil
+}
+
+// connectToUpstream establishes connection to upstream SMTP server
+func (s *SMTPServer) connectToUpstream(serverConfig *ServerConfig, clientAddr string) (net.Conn, error) {
+	upstreamAddr := fmt.Sprintf("%s:%d", serverConfig.SMTP.Host, serverConfig.SMTP.Port)
+	var upstreamConn net.Conn
+	var err error
+
+	LogInfo("SMTP connecting to upstream server %s for mailbox %s", upstreamAddr, serverConfig.SMTP.Username)
+
+	// For port 587, always start with plain connection (STARTTLS)
+	// For port 465, use direct TLS connection
+	if serverConfig.SMTP.Port == 465 && serverConfig.SMTP.UseTLS {
+		upstreamConn, err = tls.Dial("tcp", upstreamAddr, &tls.Config{ServerName: serverConfig.SMTP.Host})
+	} else {
+		upstreamConn, err = net.Dial("tcp", upstreamAddr)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to %s: %w", upstreamAddr, err)
+	}
+
+	// Handle STARTTLS upgrade if needed (port 587)
+	if serverConfig.SMTP.Port == 587 && serverConfig.SMTP.UseTLS {
+		upstreamConn, err = s.upgradeToSTARTTLS(upstreamConn, serverConfig.SMTP, clientAddr)
+		if err != nil {
+			upstreamConn.Close()
+			return nil, fmt.Errorf("STARTTLS upgrade failed: %w", err)
+		}
+	}
+
+	LogInfo("SMTP successfully connected to upstream server %s for mailbox %s", upstreamAddr, serverConfig.SMTP.Username)
+	return upstreamConn, nil
 }

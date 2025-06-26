@@ -30,8 +30,9 @@ type LocalConfig struct {
 }
 
 type Config struct {
-	Servers []ServerConfig `yaml:"servers"`
-	Local   LocalConfig    `yaml:"local"`
+	Servers  []ServerConfig `yaml:"servers"`
+	Local    LocalConfig    `yaml:"local"`
+	LogLevel string         `yaml:"log_level,omitempty"` // "info" or "debug"
 }
 
 func LoadConfig(path string) (*Config, error) {

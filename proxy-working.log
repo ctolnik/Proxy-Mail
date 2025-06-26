@@ -1,0 +1,39 @@
+2025/06/26 03:05:00 [INFO] Proxy-Mail starting with log level: debug
+2025/06/26 03:05:00 Started POP3 proxy server on port 110
+2025/06/26 03:05:00 Started SMTP proxy server on port 25
+2025/06/26 03:05:00 Proxy-Mail service supports:
+2025/06/26 03:05:00   - Local POP3 server for legacy clients (incoming mail)
+2025/06/26 03:05:00   - Local SMTP server for legacy clients (outgoing mail)
+2025/06/26 03:05:00   - Upstream POP3, IMAP, and SMTP connections
+2025/06/26 03:05:00   - Automatic protocol translation (POP3 client <-> IMAP server)
+2025/06/26 03:05:00   - Transparent authentication for both incoming and outgoing mail
+2025/06/26 03:05:00 Email proxy service started successfully
+2025/06/26 03:05:00 [INFO] POP3 proxy server listening on 0.0.0.0:110
+2025/06/26 03:05:00 [SMTP] Proxy server listening on 0.0.0.0:25
+2025/06/26 03:05:03 [INFO] POP3 client connected from [::1]:52883
+2025/06/26 03:05:03 [INFO] POP3: Client connected, waiting for credentials
+2025/06/26 03:05:03 [DEBUG] POP3 CLIENT -> PROXY ([::1]:52883): USER lawoffice.gsl@gmail.com
+2025/06/26 03:05:03 [INFO] POP3 user lawoffice.gsl@gmail.com accepted from client [::1]:52883
+2025/06/26 03:05:03 [DEBUG] POP3 CLIENT -> PROXY ([::1]:52883): PASS test
+2025/06/26 03:05:03 [INFO] POP3 Using mailbox lawoffice.gsl@gmail.com (IMAP) for user lawoffice.gsl@gmail.com
+2025/06/26 03:05:03 [INFO] POP3 Connecting to upstream IMAP server imap.gmail.com:993 for mailbox lawoffice.gsl@gmail.com
+2025/06/26 03:05:03 [INFO] POP3 Successfully connected to upstream IMAP server for mailbox lawoffice.gsl@gmail.com
+2025/06/26 03:05:03 [POP3] Starting authenticated POP3-to-IMAP translation for client [::1]:52883
+2025/06/26 03:05:03 [POP3] PROXY -> IMAP-SERVER ([::1]:52883): A1001 LOGIN lawoffice.gsl@gmail.com [hidden]
+2025/06/26 03:05:03 [POP3] IMAP-SERVER -> PROXY ([::1]:52883): * OK Gimap ready for requests from 46.150.174.44 r7mb5315486ltp
+2025/06/26 03:05:04 [POP3] IMAP-SERVER -> PROXY ([::1]:52883): * CAPABILITY IMAP4rev1 UNSELECT IDLE NAMESPACE QUOTA ID XLIST CHILDREN X-GM-EXT-1 UIDPLUS COMPRESS=DEFLATE ENABLE MOVE CONDSTORE ESEARCH UTF8=ACCEPT LIST-EXTENDED LIST-STATUS LITERAL- SPECIAL-USE APPENDLIMIT=35651584
+2025/06/26 03:05:04 [POP3] IMAP-SERVER -> PROXY ([::1]:52883): A1001 OK lawoffice.gsl@gmail.com authenticated (Success)
+2025/06/26 03:05:04 [POP3] PROXY -> IMAP-SERVER ([::1]:52883): A1002 SELECT INBOX
+2025/06/26 03:05:04 [POP3] IMAP-SERVER -> PROXY ([::1]:52883): * FLAGS (\Answered \Flagged \Draft \Deleted \Seen $NotPhishing $Phishing)
+2025/06/26 03:05:04 [POP3] IMAP-SERVER -> PROXY ([::1]:52883): * OK [PERMANENTFLAGS (\Answered \Flagged \Draft \Deleted \Seen $NotPhishing $Phishing \*)] Flags permitted.
+2025/06/26 03:05:04 [POP3] IMAP-SERVER -> PROXY ([::1]:52883): * OK [UIDVALIDITY 1] UIDs valid.
+2025/06/26 03:05:04 [POP3] IMAP-SERVER -> PROXY ([::1]:52883): * 6 EXISTS
+2025/06/26 03:05:04 [POP3] IMAP-SERVER -> PROXY ([::1]:52883): * 0 RECENT
+2025/06/26 03:05:04 [POP3] IMAP-SERVER -> PROXY ([::1]:52883): * OK [UIDNEXT 7212] Predicted next UID.
+2025/06/26 03:05:04 [POP3] IMAP-SERVER -> PROXY ([::1]:52883): * OK [HIGHESTMODSEQ 1052404]
+2025/06/26 03:05:04 [POP3] IMAP-SERVER -> PROXY ([::1]:52883): A1002 OK [READ-WRITE] INBOX selected. (Success)
+2025/06/26 03:05:04 [POP3] INBOX selected with 6 messages
+2025/06/26 03:05:04 [POP3] PROXY -> CLIENT ([::1]:52883): +OK Mailbox locked and ready
+2025/06/26 03:05:04 [POP3] Client [::1]:52883 disconnected: EOF
+2025/06/26 03:42:24 Shutting down email proxy service...
+2025/06/26 03:42:24 Email proxy service stopped

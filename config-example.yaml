@@ -1,6 +1,9 @@
 # Example configuration for multiple mailboxes
 # Copy this to config.yaml and modify with your settings
 
+# Log level: "info" for high-level operations, "debug" for detailed protocol exchanges
+log_level: info
+
 servers:
   # First Gmail account (Personal)
   - name: "personal-gmail"
