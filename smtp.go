@@ -151,7 +151,7 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 		case "MAIL":
 			if !state.isAuthenticated {
 				fmt.Fprintf(localConn, "530 Authentication required\r\n")
-				LogWarn("[%s] SMTP client %s attempted MAIL FROM without authentication", state.getMailboxIdentifier(), clientAddr)
+				LogError("[%s] SMTP client %s attempted MAIL FROM without authentication", state.getMailboxIdentifier(), clientAddr)
 				continue
 			}
 
@@ -160,7 +160,7 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 			
 			// Verify sender matches authenticated user
 			if senderEmail != state.authUsername {
-				LogWarn("[%s] Sender mismatch: authenticated as %s but trying to send as %s",
+				LogError("[%s] Sender mismatch: authenticated as %s but trying to send as %s",
 					state.mailboxName, state.authUsername, senderEmail)
 				fmt.Fprintf(localConn, "550 Sender address must match authenticated user\r\n")
 				continue
@@ -220,7 +220,7 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 				serverConfig := s.findServerConfigByUsername(state.authUsername)
 				if serverConfig == nil || !s.validateCredentials(state.authUsername, password, serverConfig) {
 					fmt.Fprintf(localConn, "535 Authentication failed\r\n")
-					LogWarn("[%s] Authentication failed for client %s", state.getMailboxIdentifier(), clientAddr)
+					LogError("[%s] Authentication failed for client %s", state.getMailboxIdentifier(), clientAddr)
 					state.authState = ""
 					continue
 				}
