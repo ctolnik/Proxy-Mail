@@ -162,8 +162,17 @@ func (s *POP3Server) handleIMAPBackend(localConn net.Conn, clientAddr string) {
 		// Read line as raw bytes to preserve encoding
 		lineBytes, err := clientReader.ReadBytes('\n')
 		if err != nil {
-			log.Printf("[POP3] Client %s disconnected: %v", clientAddr, err)
-			break
+			if upstreamConn != nil {
+				upstreamConn.Close()
+			}
+			// Safe logging that handles nil upstreamConfig
+			if upstreamConfig != nil {
+				log.Printf("[POP3] Client %s disconnected from IMAP mailbox %s: %v", 
+					clientAddr, upstreamConfig.Username, err)
+			} else {
+				log.Printf("[POP3] Client %s disconnected: %v", clientAddr, err)
+			}
+			return
 		}
 		
 		// Convert to string for command parsing only
@@ -627,6 +636,12 @@ func (s *POP3Server) handleIMAPBackend(localConn net.Conn, clientAddr string) {
 		}
 	}
 
-	log.Printf("[POP3] Client %s disconnected from IMAP mailbox %s", clientAddr, upstreamConfig.Username)
+	// Safe cleanup logging at the end of the function
+	if upstreamConfig != nil {
+		log.Printf("[POP3] Client %s disconnected from IMAP mailbox %s", 
+			clientAddr, upstreamConfig.Username)
+	} else {
+		log.Printf("[POP3] Client %s disconnected", clientAddr)
+	}
 }
 
