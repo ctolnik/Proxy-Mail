@@ -76,19 +76,37 @@ func (s *SMTPServer) handleConnection(localConn net.Conn) {
 	s.handleSMTPSessionDynamic(localConn, clientAddr)
 }
 
+// smtpState tracks the state of an SMTP session
+type smtpState struct {
+	isAuthenticated bool
+	authUsername    string // full email address
+	authState       string // "", "username", "password"
+	mailboxName     string // for logging context
+	upstreamConn    net.Conn
+	serverConfig    *ServerConfig
+}
+
+// getMailboxIdentifier returns a string identifier for the current mailbox for logging
+func (s *smtpState) getMailboxIdentifier() string {
+	if s.mailboxName != "" {
+		return s.mailboxName
+	}
+	if s.authUsername != "" {
+		return s.authUsername
+	}
+	return "unknown"
+}
+
 // handleSMTPSessionDynamic handles SMTP session with dynamic mailbox selection
 func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr string) {
 	clientReader := bufio.NewReader(localConn)
-	var selectedMailbox string
-	var upstreamConn net.Conn
-	var serverConfig *ServerConfig
-	var isConnectedToUpstream bool
+	state := &smtpState{}
 
 	for {
 		// Read line from client
 		lineBytes, err := clientReader.ReadBytes('\n')
 		if err != nil {
-			LogDebug("SMTP client %s disconnected: %v", clientAddr, err)
+			LogDebug("[%s] SMTP client %s disconnected: %v", state.getMailboxIdentifier(), clientAddr, err)
 			break
 		}
 
@@ -103,62 +121,152 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 			command = strings.ToUpper(fields[0])
 		}
 
-		LogDebug("SMTP CLIENT -> PROXY (%s): %s", clientAddr, line)
+		LogDebug("[%s] SMTP CLIENT -> PROXY (%s): %s", state.getMailboxIdentifier(), clientAddr, line)
 
-		// Handle MAIL FROM command to determine which mailbox to use
-		if command == "MAIL" && strings.Contains(strings.ToUpper(line), "FROM:") {
-			// Extract sender email from MAIL FROM command
-			senderEmail := s.extractEmailFromMailFrom(line)
-			LogInfo("SMTP selecting mailbox for sender: %s", senderEmail)
-
-			// Find matching server config for this sender
-			serverConfig = s.findServerConfigBySender(senderEmail)
-			if serverConfig == nil {
-				LogError("No SMTP server configuration found for sender: %s", senderEmail)
-				fmt.Fprintf(localConn, "550 No mailbox configured for sender\r\n")
-				continue
-			}
-
-			selectedMailbox = serverConfig.SMTP.Username
-			LogInfo("SMTP using mailbox: %s for sender: %s", selectedMailbox, senderEmail)
-
-			// Connect to upstream SMTP server for this mailbox
-			upstreamConn, err = s.connectToUpstream(serverConfig, clientAddr)
-			if err != nil {
-				LogError("Failed to connect to upstream SMTP for %s: %v", selectedMailbox, err)
-				fmt.Fprintf(localConn, "421 Cannot connect to mail server\r\n")
-				continue
-			}
-			isConnectedToUpstream = true
-
-			// Start normal SMTP session with the selected upstream
-			defer upstreamConn.Close()
-			s.handleSMTPSession(localConn, upstreamConn, serverConfig.SMTP, clientAddr)
-			return
-		}
-
-		// Handle other commands before mailbox selection
+		// Handle commands with state management
 		switch command {
 		case "EHLO", "HELO":
 			fmt.Fprintf(localConn, "250-Proxy-Mail SMTP Ready\r\n")
 			fmt.Fprintf(localConn, "250-AUTH LOGIN\r\n")
 			fmt.Fprintf(localConn, "250 STARTTLS\r\n")
-			LogDebug("SMTP sent EHLO response to client %s", clientAddr)
+			LogDebug("[%s] SMTP sent capabilities to client %s", state.getMailboxIdentifier(), clientAddr)
+
+		case "AUTH":
+			if len(fields) < 2 {
+				fmt.Fprintf(localConn, "501 Syntax error\r\n")
+				continue
+			}
+
+			authType := strings.ToUpper(fields[1])
+			if authType == "LOGIN" {
+				fmt.Fprintf(localConn, "334 VXNlcm5hbWU6\r\n") // Base64 for "Username:"
+				state.authState = "username"
+				LogDebug("[%s] SMTP client %s starting AUTH LOGIN", state.getMailboxIdentifier(), clientAddr)
+				continue
+			}
+
+			fmt.Fprintf(localConn, "504 Authentication mechanism not supported\r\n")
+			continue
+			
+		case "MAIL":
+			if !state.isAuthenticated {
+				fmt.Fprintf(localConn, "530 Authentication required\r\n")
+				LogWarn("[%s] SMTP client %s attempted MAIL FROM without authentication", state.getMailboxIdentifier(), clientAddr)
+				continue
+			}
+
+			// Extract sender email from MAIL FROM command
+			senderEmail := s.extractEmailFromMailFrom(line)
+			
+			// Verify sender matches authenticated user
+			if senderEmail != state.authUsername {
+				LogWarn("[%s] Sender mismatch: authenticated as %s but trying to send as %s",
+					state.mailboxName, state.authUsername, senderEmail)
+				fmt.Fprintf(localConn, "550 Sender address must match authenticated user\r\n")
+				continue
+			}
+			
+			LogInfo("[%s] SMTP processing MAIL FROM command", state.mailboxName)
+			
+			// Connect to upstream if not already connected
+			if state.upstreamConn == nil {
+				var err error
+				state.upstreamConn, err = s.connectToUpstream(state.serverConfig, clientAddr)
+				if err != nil {
+					LogError("[%s] Failed to connect to upstream server: %v", state.mailboxName, err)
+					fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+					continue
+				}
+			}
+
+			// Start normal SMTP session with the selected upstream
+			defer state.upstreamConn.Close()
+			s.handleSMTPSession(localConn, state.upstreamConn, state.serverConfig.SMTP, clientAddr)
+			return
 
 		case "QUIT":
 			fmt.Fprintf(localConn, "221 Goodbye\r\n")
-			LogDebug("SMTP client %s quit", clientAddr)
+			LogDebug("[%s] SMTP client %s quit", state.getMailboxIdentifier(), clientAddr)
 			return
 
 		default:
-			fmt.Fprintf(localConn, "503 Need MAIL FROM first\r\n")
-			LogDebug("SMTP client %s sent command before MAIL FROM: %s", clientAddr, command)
+			// Handle authentication states
+			if state.authState == "username" {
+				decoded, err := base64.StdEncoding.DecodeString(line)
+				if err != nil {
+					fmt.Fprintf(localConn, "501 Invalid base64 encoding\r\n")
+					state.authState = ""
+					continue
+				}
+
+				state.authUsername = string(decoded)
+				state.authState = "password"
+				fmt.Fprintf(localConn, "334 UGFzc3dvcmQ6\r\n") // Base64 for "Password:"
+				LogDebug("[%s] SMTP received username from client %s", state.getMailboxIdentifier(), clientAddr)
+				continue
+			}
+
+			if state.authState == "password" {
+				decoded, err := base64.StdEncoding.DecodeString(line)
+				if err != nil {
+					fmt.Fprintf(localConn, "501 Invalid base64 encoding\r\n")
+					state.authState = ""
+					continue
+				}
+
+				password := string(decoded)
+				
+				// Find server config matching the username
+				serverConfig := s.findServerConfigByUsername(state.authUsername)
+				if serverConfig == nil || !s.validateCredentials(state.authUsername, password, serverConfig) {
+					fmt.Fprintf(localConn, "535 Authentication failed\r\n")
+					LogWarn("[%s] Authentication failed for client %s", state.getMailboxIdentifier(), clientAddr)
+					state.authState = ""
+					continue
+				}
+
+				state.isAuthenticated = true
+				state.serverConfig = serverConfig
+				state.mailboxName = state.authUsername
+				fmt.Fprintf(localConn, "235 Authentication successful\r\n")
+				LogInfo("[%s] SMTP authentication successful for client %s", state.mailboxName, clientAddr)
+				continue
+			}
+
+			if !state.isAuthenticated {
+				fmt.Fprintf(localConn, "530 Authentication required\r\n")
+				LogDebug("[%s] SMTP client %s sent command before authentication: %s", 
+					state.getMailboxIdentifier(), clientAddr, command)
+				continue
+			}
+			
+			// If we got here, client is authenticated but using a command we don't handle explicitly
+			fmt.Fprintf(localConn, "502 Command not implemented\r\n")
+			LogDebug("[%s] SMTP client %s sent unhandled command: %s", state.mailboxName, clientAddr, command)
 		}
 	}
 
-	if isConnectedToUpstream {
-		upstreamConn.Close()
+	// Cleanup
+	if state.upstreamConn != nil {
+		state.upstreamConn.Close()
 	}
+}
+
+// findServerConfigByUsername finds a server config that matches the username (email address)
+func (s *SMTPServer) findServerConfigByUsername(email string) *ServerConfig {
+	for _, server := range s.config.Servers {
+		if server.SMTP != nil && server.SMTP.Username == email {
+			LogInfo("Found server config for mailbox: %s", email)
+			return &server
+		}
+	}
+	LogError("No server configuration found for email: %s", email)
+	return nil
+}
+
+// validateCredentials validates the provided username and password against the server config
+func (s *SMTPServer) validateCredentials(username, password string, config *ServerConfig) bool {
+	return config.SMTP.Username == username && config.SMTP.Password == password
 }
 
 func (s *SMTPServer) handleSMTPSessionWithOptions(localConn, upstreamConn net.Conn, upstreamConfig *MailServerConfig, clientAddr string, skipGreeting bool) {
