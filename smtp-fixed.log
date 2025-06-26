@@ -1,0 +1,97 @@
+2025/06/26 15:55:31 [INFO] Proxy-Mail starting with log level: debug
+2025/06/26 15:55:31 Started POP3 proxy server on port 110
+2025/06/26 15:55:31 Started SMTP proxy server on port 25
+2025/06/26 15:55:31 Proxy-Mail service supports:
+2025/06/26 15:55:31   - Local POP3 server for legacy clients (incoming mail)
+2025/06/26 15:55:31   - Local SMTP server for legacy clients (outgoing mail)
+2025/06/26 15:55:31   - Upstream POP3, IMAP, and SMTP connections
+2025/06/26 15:55:31   - Automatic protocol translation (POP3 client <-> IMAP server)
+2025/06/26 15:55:31   - Transparent authentication for both incoming and outgoing mail
+2025/06/26 15:55:31 Email proxy service started successfully
+2025/06/26 15:55:31 POP3 proxy server listening on 0.0.0.0:110
+2025/06/26 15:55:31 [SMTP] Proxy server listening on 0.0.0.0:25
+2025/06/26 15:55:43 [INFO] SMTP client connected from [::1]:63650
+2025/06/26 15:55:43 [DEBUG] SMTP sent greeting to client [::1]:63650
+2025/06/26 15:55:43 [DEBUG] SMTP CLIENT -> PROXY ([::1]:63650): EHLO test
+2025/06/26 15:55:43 [DEBUG] SMTP sent EHLO response to client [::1]:63650
+2025/06/26 15:55:43 [DEBUG] SMTP CLIENT -> PROXY ([::1]:63650): MAIL FROM:<lawoffice.gsl@gmail.com>
+2025/06/26 15:55:43 [INFO] SMTP selecting mailbox for sender: lawoffice.gsl@gmail.com
+2025/06/26 15:55:43 [INFO] SMTP using mailbox: lawoffice.gsl@gmail.com for sender: lawoffice.gsl@gmail.com
+2025/06/26 15:55:43 [INFO] SMTP connecting to upstream server smtp.gmail.com:587 for mailbox lawoffice.gsl@gmail.com
+2025/06/26 15:55:43 [SMTP] STARTTLS greeting ([::1]:63650): 220 smtp.gmail.com ESMTP 2adb3069b0e04-553ea7f791asm2224627e87.154 - gsmtp
+2025/06/26 15:55:43 [SMTP] STARTTLS EHLO ([::1]:63650): EHLO localhost
+2025/06/26 15:55:43 [SMTP] STARTTLS EHLO response ([::1]:63650): 250-smtp.gmail.com at your service, [46.150.174.44]
+2025/06/26 15:55:43 [SMTP] STARTTLS EHLO response ([::1]:63650): 250-SIZE 35882577
+2025/06/26 15:55:43 [SMTP] STARTTLS EHLO response ([::1]:63650): 250-8BITMIME
+2025/06/26 15:55:43 [SMTP] STARTTLS EHLO response ([::1]:63650): 250-STARTTLS
+2025/06/26 15:55:43 [SMTP] STARTTLS EHLO response ([::1]:63650): 250-ENHANCEDSTATUSCODES
+2025/06/26 15:55:43 [SMTP] STARTTLS EHLO response ([::1]:63650): 250-PIPELINING
+2025/06/26 15:55:43 [SMTP] STARTTLS EHLO response ([::1]:63650): 250-CHUNKING
+2025/06/26 15:55:43 [SMTP] STARTTLS EHLO response ([::1]:63650): 250 SMTPUTF8
+2025/06/26 15:55:43 [SMTP] STARTTLS command ([::1]:63650): STARTTLS
+2025/06/26 15:55:43 [SMTP] STARTTLS response ([::1]:63650): 220 2.0.0 Ready to start TLS
+2025/06/26 15:55:43 [SMTP] Post-STARTTLS EHLO ([::1]:63650): EHLO localhost
+2025/06/26 15:55:43 [SMTP] Post-STARTTLS EHLO response ([::1]:63650): 250-smtp.gmail.com at your service, [46.150.174.44]
+2025/06/26 15:55:43 [SMTP] Post-STARTTLS EHLO response ([::1]:63650): 250-SIZE 35882577
+2025/06/26 15:55:43 [SMTP] Post-STARTTLS EHLO response ([::1]:63650): 250-8BITMIME
+2025/06/26 15:55:43 [SMTP] Post-STARTTLS EHLO response ([::1]:63650): 250-AUTH LOGIN PLAIN XOAUTH2 PLAIN-CLIENTTOKEN OAUTHBEARER XOAUTH
+2025/06/26 15:55:43 [SMTP] Post-STARTTLS EHLO response ([::1]:63650): 250-ENHANCEDSTATUSCODES
+2025/06/26 15:55:43 [SMTP] Post-STARTTLS EHLO response ([::1]:63650): 250-PIPELINING
+2025/06/26 15:55:43 [SMTP] Post-STARTTLS EHLO response ([::1]:63650): 250-CHUNKING
+2025/06/26 15:55:43 [SMTP] Post-STARTTLS EHLO response ([::1]:63650): 250 SMTPUTF8
+2025/06/26 15:55:43 [SMTP] STARTTLS upgrade successful ([::1]:63650)
+2025/06/26 15:55:43 [INFO] SMTP auto-authenticating with lawoffice.gsl@gmail.com after STARTTLS
+2025/06/26 15:55:43 [DEBUG] SMTP AUTO AUTH: AUTH LOGIN
+2025/06/26 15:55:43 [DEBUG] SMTP AUTO AUTH response: 334 VXNlcm5hbWU6
+2025/06/26 15:55:43 [DEBUG] SMTP AUTO AUTH: sent username lawoffice.gsl@gmail.com
+2025/06/26 15:55:43 [DEBUG] SMTP AUTO AUTH response: 334 UGFzc3dvcmQ6
+2025/06/26 15:55:43 [DEBUG] SMTP AUTO AUTH: sent password [hidden]
+2025/06/26 15:55:43 [DEBUG] SMTP AUTO AUTH result: 235 2.7.0 Accepted
+2025/06/26 15:55:43 [INFO] SMTP auto-authentication successful for lawoffice.gsl@gmail.com
+2025/06/26 15:55:43 [INFO] SMTP successfully connected to upstream server smtp.gmail.com:587 for mailbox lawoffice.gsl@gmail.com
+2025/06/26 15:55:43 [SMTP] Starting SMTP session for client [::1]:63650 (skipGreeting: false)
+2025/06/26 16:05:43 [SMTP] UPSTREAM -> PROXY ([::1]:63650): 451-4.4.2 Timeout - closing connection.
+2025/06/26 16:05:43 [SMTP] PROXY -> CLIENT ([::1]:63650): 451-4.4.2 Timeout - closing connection.
+2025/06/26 16:05:43 [SMTP] Handling SMTP commands for client [::1]:63650
+2025/06/26 16:05:43 [SMTP] Client [::1]:63650 disconnected: EOF
+2025/06/26 16:05:43 [SMTP] Client [::1]:63650 disconnected from SMTP mailbox lawoffice.gsl@gmail.com
+2025/06/26 16:06:08 [INFO] SMTP client connected from [::1]:64233
+2025/06/26 16:06:08 [DEBUG] SMTP sent greeting to client [::1]:64233
+2025/06/26 16:06:08 [DEBUG] SMTP CLIENT -> PROXY ([::1]:64233): EHLO test
+2025/06/26 16:06:08 [DEBUG] SMTP sent EHLO response to client [::1]:64233
+2025/06/26 16:06:08 [DEBUG] SMTP CLIENT -> PROXY ([::1]:64233): MAIL FROM:<lawoffice.gsl@gmail.com>
+2025/06/26 16:06:08 [INFO] SMTP selecting mailbox for sender: lawoffice.gsl@gmail.com
+2025/06/26 16:06:08 [INFO] SMTP using mailbox: lawoffice.gsl@gmail.com for sender: lawoffice.gsl@gmail.com
+2025/06/26 16:06:08 [INFO] SMTP connecting to upstream server smtp.gmail.com:587 for mailbox lawoffice.gsl@gmail.com
+2025/06/26 16:06:09 [SMTP] STARTTLS greeting ([::1]:64233): 220 smtp.gmail.com ESMTP 38308e7fff4ca-32cd2e31712sm2187981fa.50 - gsmtp
+2025/06/26 16:06:09 [SMTP] STARTTLS EHLO ([::1]:64233): EHLO localhost
+2025/06/26 16:06:09 [SMTP] STARTTLS EHLO response ([::1]:64233): 250-smtp.gmail.com at your service, [46.150.174.44]
+2025/06/26 16:06:09 [SMTP] STARTTLS EHLO response ([::1]:64233): 250-SIZE 35882577
+2025/06/26 16:06:09 [SMTP] STARTTLS EHLO response ([::1]:64233): 250-8BITMIME
+2025/06/26 16:06:09 [SMTP] STARTTLS EHLO response ([::1]:64233): 250-STARTTLS
+2025/06/26 16:06:09 [SMTP] STARTTLS EHLO response ([::1]:64233): 250-ENHANCEDSTATUSCODES
+2025/06/26 16:06:09 [SMTP] STARTTLS EHLO response ([::1]:64233): 250-PIPELINING
+2025/06/26 16:06:09 [SMTP] STARTTLS EHLO response ([::1]:64233): 250-CHUNKING
+2025/06/26 16:06:09 [SMTP] STARTTLS EHLO response ([::1]:64233): 250 SMTPUTF8
+2025/06/26 16:06:09 [SMTP] STARTTLS command ([::1]:64233): STARTTLS
+2025/06/26 16:06:09 [SMTP] STARTTLS response ([::1]:64233): 220 2.0.0 Ready to start TLS
+2025/06/26 16:06:09 [SMTP] Post-STARTTLS EHLO ([::1]:64233): EHLO localhost
+2025/06/26 16:06:09 [SMTP] Post-STARTTLS EHLO response ([::1]:64233): 250-smtp.gmail.com at your service, [46.150.174.44]
+2025/06/26 16:06:09 [SMTP] Post-STARTTLS EHLO response ([::1]:64233): 250-SIZE 35882577
+2025/06/26 16:06:09 [SMTP] Post-STARTTLS EHLO response ([::1]:64233): 250-8BITMIME
+2025/06/26 16:06:09 [SMTP] Post-STARTTLS EHLO response ([::1]:64233): 250-AUTH LOGIN PLAIN XOAUTH2 PLAIN-CLIENTTOKEN OAUTHBEARER XOAUTH
+2025/06/26 16:06:09 [SMTP] Post-STARTTLS EHLO response ([::1]:64233): 250-ENHANCEDSTATUSCODES
+2025/06/26 16:06:09 [SMTP] Post-STARTTLS EHLO response ([::1]:64233): 250-PIPELINING
+2025/06/26 16:06:09 [SMTP] Post-STARTTLS EHLO response ([::1]:64233): 250-CHUNKING
+2025/06/26 16:06:09 [SMTP] Post-STARTTLS EHLO response ([::1]:64233): 250 SMTPUTF8
+2025/06/26 16:06:09 [SMTP] STARTTLS upgrade successful ([::1]:64233)
+2025/06/26 16:06:09 [INFO] SMTP auto-authenticating with lawoffice.gsl@gmail.com after STARTTLS
+2025/06/26 16:06:09 [DEBUG] SMTP AUTO AUTH: AUTH LOGIN
+2025/06/26 16:06:09 [DEBUG] SMTP AUTO AUTH response: 334 VXNlcm5hbWU6
+2025/06/26 16:06:09 [DEBUG] SMTP AUTO AUTH: sent username lawoffice.gsl@gmail.com
+2025/06/26 16:06:09 [DEBUG] SMTP AUTO AUTH response: 334 UGFzc3dvcmQ6
+2025/06/26 16:06:09 [DEBUG] SMTP AUTO AUTH: sent password [hidden]
+2025/06/26 16:06:09 [DEBUG] SMTP AUTO AUTH result: 235 2.7.0 Accepted
+2025/06/26 16:06:09 [INFO] SMTP auto-authentication successful for lawoffice.gsl@gmail.com
+2025/06/26 16:06:09 [INFO] SMTP successfully connected to upstream server smtp.gmail.com:587 for mailbox lawoffice.gsl@gmail.com
+2025/06/26 16:06:09 [SMTP] Starting SMTP session for client [::1]:64233 (skipGreeting: false)

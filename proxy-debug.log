@@ -1,0 +1,88 @@
+2025/06/26 15:26:20 [INFO] Proxy-Mail starting with log level: debug
+2025/06/26 15:26:20 Started POP3 proxy server on port 110
+2025/06/26 15:26:20 Started SMTP proxy server on port 25
+2025/06/26 15:26:20 Proxy-Mail service supports:
+2025/06/26 15:26:20   - Local POP3 server for legacy clients (incoming mail)
+2025/06/26 15:26:20   - Local SMTP server for legacy clients (outgoing mail)
+2025/06/26 15:26:20   - Upstream POP3, IMAP, and SMTP connections
+2025/06/26 15:26:20   - Automatic protocol translation (POP3 client <-> IMAP server)
+2025/06/26 15:26:20   - Transparent authentication for both incoming and outgoing mail
+2025/06/26 15:26:20 Email proxy service started successfully
+2025/06/26 15:26:20 POP3 proxy server listening on 0.0.0.0:110
+2025/06/26 15:26:20 [SMTP] Proxy server listening on 0.0.0.0:25
+2025/06/26 15:26:33 [INFO] SMTP client connected from [::1]:62113
+2025/06/26 15:26:33 [DEBUG] SMTP sent greeting to client [::1]:62113
+2025/06/26 15:26:33 [DEBUG] SMTP CLIENT -> PROXY ([::1]:62113): EHLO test
+2025/06/26 15:26:33 [DEBUG] SMTP sent EHLO response to client [::1]:62113
+2025/06/26 15:26:33 [DEBUG] SMTP CLIENT -> PROXY ([::1]:62113): MAIL FROM:<lawoffice.gsl@gmail.com>
+2025/06/26 15:26:33 [INFO] SMTP selecting mailbox for sender: lawoffice.gsl@gmail.com
+2025/06/26 15:26:33 [INFO] SMTP using mailbox: lawoffice.gsl@gmail.com for sender: lawoffice.gsl@gmail.com
+2025/06/26 15:26:33 [INFO] SMTP connecting to upstream server smtp.gmail.com:587 for mailbox lawoffice.gsl@gmail.com
+2025/06/26 15:26:33 [SMTP] STARTTLS greeting ([::1]:62113): 220 smtp.gmail.com ESMTP 38308e7fff4ca-32cd2efef4esm2047141fa.91 - gsmtp
+2025/06/26 15:26:33 [SMTP] STARTTLS EHLO ([::1]:62113): EHLO localhost
+2025/06/26 15:26:33 [SMTP] STARTTLS EHLO response ([::1]:62113): 250-smtp.gmail.com at your service, [46.150.174.44]
+2025/06/26 15:26:33 [SMTP] STARTTLS EHLO response ([::1]:62113): 250-SIZE 35882577
+2025/06/26 15:26:33 [SMTP] STARTTLS EHLO response ([::1]:62113): 250-8BITMIME
+2025/06/26 15:26:33 [SMTP] STARTTLS EHLO response ([::1]:62113): 250-STARTTLS
+2025/06/26 15:26:33 [SMTP] STARTTLS EHLO response ([::1]:62113): 250-ENHANCEDSTATUSCODES
+2025/06/26 15:26:33 [SMTP] STARTTLS EHLO response ([::1]:62113): 250-PIPELINING
+2025/06/26 15:26:33 [SMTP] STARTTLS EHLO response ([::1]:62113): 250-CHUNKING
+2025/06/26 15:26:33 [SMTP] STARTTLS EHLO response ([::1]:62113): 250 SMTPUTF8
+2025/06/26 15:26:33 [SMTP] STARTTLS command ([::1]:62113): STARTTLS
+2025/06/26 15:26:33 [SMTP] STARTTLS response ([::1]:62113): 220 2.0.0 Ready to start TLS
+2025/06/26 15:26:33 [SMTP] Post-STARTTLS EHLO ([::1]:62113): EHLO localhost
+2025/06/26 15:26:33 [SMTP] Post-STARTTLS EHLO response ([::1]:62113): 250-smtp.gmail.com at your service, [46.150.174.44]
+2025/06/26 15:26:33 [SMTP] Post-STARTTLS EHLO response ([::1]:62113): 250-SIZE 35882577
+2025/06/26 15:26:33 [SMTP] Post-STARTTLS EHLO response ([::1]:62113): 250-8BITMIME
+2025/06/26 15:26:33 [SMTP] Post-STARTTLS EHLO response ([::1]:62113): 250-AUTH LOGIN PLAIN XOAUTH2 PLAIN-CLIENTTOKEN OAUTHBEARER XOAUTH
+2025/06/26 15:26:33 [SMTP] Post-STARTTLS EHLO response ([::1]:62113): 250-ENHANCEDSTATUSCODES
+2025/06/26 15:26:33 [SMTP] Post-STARTTLS EHLO response ([::1]:62113): 250-PIPELINING
+2025/06/26 15:26:33 [SMTP] Post-STARTTLS EHLO response ([::1]:62113): 250-CHUNKING
+2025/06/26 15:26:33 [SMTP] Post-STARTTLS EHLO response ([::1]:62113): 250 SMTPUTF8
+2025/06/26 15:26:33 [SMTP] STARTTLS upgrade successful ([::1]:62113)
+2025/06/26 15:26:33 [INFO] SMTP successfully connected to upstream server smtp.gmail.com:587 for mailbox lawoffice.gsl@gmail.com
+2025/06/26 15:26:33 [SMTP] Starting SMTP session for client [::1]:62113 (skipGreeting: false)
+2025/06/26 15:27:32 [INFO] SMTP client connected from [::1]:62158
+2025/06/26 15:27:32 [DEBUG] SMTP sent greeting to client [::1]:62158
+2025/06/26 15:27:32 [DEBUG] SMTP CLIENT -> PROXY ([::1]:62158): EHLO test
+2025/06/26 15:27:32 [DEBUG] SMTP sent EHLO response to client [::1]:62158
+2025/06/26 15:27:32 [DEBUG] SMTP CLIENT -> PROXY ([::1]:62158): MAIL FROM:<lawoffice.gsl@gmail.com>
+2025/06/26 15:27:32 [INFO] SMTP selecting mailbox for sender: lawoffice.gsl@gmail.com
+2025/06/26 15:27:32 [INFO] SMTP using mailbox: lawoffice.gsl@gmail.com for sender: lawoffice.gsl@gmail.com
+2025/06/26 15:27:32 [INFO] SMTP connecting to upstream server smtp.gmail.com:587 for mailbox lawoffice.gsl@gmail.com
+2025/06/26 15:27:32 [SMTP] STARTTLS greeting ([::1]:62158): 220 smtp.gmail.com ESMTP 2adb3069b0e04-553e41bbc63sm2581019e87.118 - gsmtp
+2025/06/26 15:27:32 [SMTP] STARTTLS EHLO ([::1]:62158): EHLO localhost
+2025/06/26 15:27:32 [SMTP] STARTTLS EHLO response ([::1]:62158): 250-smtp.gmail.com at your service, [46.150.174.44]
+2025/06/26 15:27:32 [SMTP] STARTTLS EHLO response ([::1]:62158): 250-SIZE 35882577
+2025/06/26 15:27:32 [SMTP] STARTTLS EHLO response ([::1]:62158): 250-8BITMIME
+2025/06/26 15:27:32 [SMTP] STARTTLS EHLO response ([::1]:62158): 250-STARTTLS
+2025/06/26 15:27:32 [SMTP] STARTTLS EHLO response ([::1]:62158): 250-ENHANCEDSTATUSCODES
+2025/06/26 15:27:32 [SMTP] STARTTLS EHLO response ([::1]:62158): 250-PIPELINING
+2025/06/26 15:27:32 [SMTP] STARTTLS EHLO response ([::1]:62158): 250-CHUNKING
+2025/06/26 15:27:32 [SMTP] STARTTLS EHLO response ([::1]:62158): 250 SMTPUTF8
+2025/06/26 15:27:32 [SMTP] STARTTLS command ([::1]:62158): STARTTLS
+2025/06/26 15:27:32 [SMTP] STARTTLS response ([::1]:62158): 220 2.0.0 Ready to start TLS
+2025/06/26 15:27:32 [SMTP] Post-STARTTLS EHLO ([::1]:62158): EHLO localhost
+2025/06/26 15:27:32 [SMTP] Post-STARTTLS EHLO response ([::1]:62158): 250-smtp.gmail.com at your service, [46.150.174.44]
+2025/06/26 15:27:32 [SMTP] Post-STARTTLS EHLO response ([::1]:62158): 250-SIZE 35882577
+2025/06/26 15:27:32 [SMTP] Post-STARTTLS EHLO response ([::1]:62158): 250-8BITMIME
+2025/06/26 15:27:32 [SMTP] Post-STARTTLS EHLO response ([::1]:62158): 250-AUTH LOGIN PLAIN XOAUTH2 PLAIN-CLIENTTOKEN OAUTHBEARER XOAUTH
+2025/06/26 15:27:32 [SMTP] Post-STARTTLS EHLO response ([::1]:62158): 250-ENHANCEDSTATUSCODES
+2025/06/26 15:27:32 [SMTP] Post-STARTTLS EHLO response ([::1]:62158): 250-PIPELINING
+2025/06/26 15:27:32 [SMTP] Post-STARTTLS EHLO response ([::1]:62158): 250-CHUNKING
+2025/06/26 15:27:32 [SMTP] Post-STARTTLS EHLO response ([::1]:62158): 250 SMTPUTF8
+2025/06/26 15:27:32 [SMTP] STARTTLS upgrade successful ([::1]:62158)
+2025/06/26 15:27:32 [INFO] SMTP successfully connected to upstream server smtp.gmail.com:587 for mailbox lawoffice.gsl@gmail.com
+2025/06/26 15:27:32 [SMTP] Starting SMTP session for client [::1]:62158 (skipGreeting: false)
+2025/06/26 15:36:33 [SMTP] UPSTREAM -> PROXY ([::1]:62113): 451-4.4.2 Timeout - closing connection.
+2025/06/26 15:36:33 [SMTP] PROXY -> CLIENT ([::1]:62113): 451-4.4.2 Timeout - closing connection.
+2025/06/26 15:36:33 [SMTP] Handling SMTP commands for client [::1]:62113
+2025/06/26 15:36:33 [SMTP] Client [::1]:62113 disconnected: read tcp [::1]:25->[::1]:62113: read: connection reset by peer
+2025/06/26 15:36:33 [SMTP] Client [::1]:62113 disconnected from SMTP mailbox lawoffice.gsl@gmail.com
+2025/06/26 15:37:32 [SMTP] UPSTREAM -> PROXY ([::1]:62158): 451-4.4.2 Timeout - closing connection.
+2025/06/26 15:37:32 [SMTP] PROXY -> CLIENT ([::1]:62158): 451-4.4.2 Timeout - closing connection.
+2025/06/26 15:37:32 [SMTP] Handling SMTP commands for client [::1]:62158
+2025/06/26 15:37:32 [SMTP] Client [::1]:62158 disconnected: EOF
+2025/06/26 15:37:32 [SMTP] Client [::1]:62158 disconnected from SMTP mailbox lawoffice.gsl@gmail.com
+2025/06/26 15:55:30 Shutting down email proxy service...
+2025/06/26 15:55:30 Email proxy service stopped

@@ -494,6 +494,12 @@ func (s *SMTPServer) upgradeToSTARTTLS(conn net.Conn, config *MailServerConfig, 
 	}
 
 	log.Printf("[SMTP] STARTTLS upgrade successful (%s)", clientAddr)
+	
+	// Automatically authenticate with Gmail after STARTTLS
+	if err := s.autoAuthenticateAfterSTARTTLS(tlsConn, config, clientAddr); err != nil {
+		return nil, fmt.Errorf("auto-authentication failed: %w", err)
+	}
+	
 	return tlsConn, nil
 }
 
@@ -574,4 +580,61 @@ func (s *SMTPServer) connectToUpstream(serverConfig *ServerConfig, clientAddr st
 
 	LogInfo("SMTP successfully connected to upstream server %s for mailbox %s", upstreamAddr, serverConfig.SMTP.Username)
 	return upstreamConn, nil
+}
+
+// autoAuthenticateAfterSTARTTLS automatically authenticates with Gmail after STARTTLS
+func (s *SMTPServer) autoAuthenticateAfterSTARTTLS(conn net.Conn, config *MailServerConfig, clientAddr string) error {
+	scanner := bufio.NewScanner(conn)
+	
+	LogInfo("SMTP auto-authenticating with %s after STARTTLS", config.Username)
+	
+	// Start AUTH LOGIN
+	fmt.Fprintf(conn, "AUTH LOGIN\r\n")
+	LogDebug("SMTP AUTO AUTH: AUTH LOGIN")
+	
+	// Read username prompt
+	if !scanner.Scan() {
+		return fmt.Errorf("failed to read username prompt")
+	}
+	response := scanner.Text()
+	LogDebug("SMTP AUTO AUTH response: %s", response)
+	
+	if !strings.HasPrefix(response, "334") {
+		return fmt.Errorf("unexpected response to AUTH LOGIN: %s", response)
+	}
+	
+	// Send username
+	username := base64.StdEncoding.EncodeToString([]byte(config.Username))
+	fmt.Fprintf(conn, "%s\r\n", username)
+	LogDebug("SMTP AUTO AUTH: sent username %s", config.Username)
+	
+	// Read password prompt
+	if !scanner.Scan() {
+		return fmt.Errorf("failed to read password prompt")
+	}
+	response = scanner.Text()
+	LogDebug("SMTP AUTO AUTH response: %s", response)
+	
+	if !strings.HasPrefix(response, "334") {
+		return fmt.Errorf("unexpected response to password prompt: %s", response)
+	}
+	
+	// Send password
+	password := base64.StdEncoding.EncodeToString([]byte(config.Password))
+	fmt.Fprintf(conn, "%s\r\n", password)
+	LogDebug("SMTP AUTO AUTH: sent password [hidden]")
+	
+	// Read authentication result
+	if !scanner.Scan() {
+		return fmt.Errorf("failed to read auth result")
+	}
+	response = scanner.Text()
+	LogDebug("SMTP AUTO AUTH result: %s", response)
+	
+	if !strings.HasPrefix(response, "235") {
+		return fmt.Errorf("authentication failed: %s", response)
+	}
+	
+	LogInfo("SMTP auto-authentication successful for %s", config.Username)
+	return nil
 }
