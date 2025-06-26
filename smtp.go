@@ -103,13 +103,13 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 	clientReader := bufio.NewReader(localConn)
 	state := &smtpState{}
 
-	// Initial greeting
-	fmt.Fprintf(localConn, "220 Proxy-Mail SMTP Ready\r\n")
-	LogDebug("[%s] SMTP sent greeting to client %s", state.getMailboxIdentifier(), clientAddr)
+	// Initial greeting already sent in handleConnection, don't send it again here
+	LogDebug("[%s] Starting SMTP session for client %s", state.getMailboxIdentifier(), clientAddr)
 
 	// Ensure we clean up connections on exit
 	defer func() {
 		if state.upstreamConn != nil {
+			LogDebug("[%s] Closing upstream connection for client %s", state.getMailboxIdentifier(), clientAddr)
 			state.upstreamConn.Close()
 		}
 	}()
@@ -158,8 +158,10 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 					
 					if strings.HasPrefix(response, "250") {
 						LogInfo("✅ Email sent successfully from %s", state.mailboxName)
+						LogInfo("[%s] SMTP transaction completed successfully", state.mailboxName)
 					} else {
 						LogError("❌ Email failed to send from %s: %s", state.mailboxName, response)
+						LogError("[%s] SMTP transaction failed", state.mailboxName)
 					}
 				}
 			} else {
@@ -222,6 +224,7 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 			
 			// Connect to upstream if not already connected
 			if state.upstreamConn == nil {
+				LogInfo("[%s] Establishing new upstream connection for MAIL FROM command", state.mailboxName)
 				var err error
 				state.upstreamConn, err = s.connectToUpstream(state.serverConfig, clientAddr)
 				if err != nil {
@@ -245,6 +248,7 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 				// Send EHLO to upstream
 				fmt.Fprintf(state.upstreamConn, "EHLO proxy-mail\r\n")
 				LogDebug("[%s] PROXY -> UPSTREAM: EHLO proxy-mail", state.mailboxName)
+				LogInfo("[%s] Initiating SMTP handshake with upstream server", state.mailboxName)
 				
 				// Read multi-line EHLO response
 				for {
@@ -340,6 +344,7 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 				}
 				
 				LogInfo("[%s] Successfully authenticated with upstream SMTP server", state.mailboxName)
+				LogInfo("[%s] Ready to send email from %s", state.mailboxName, state.authUsername)
 			}
 
 			// Forward MAIL FROM command to upstream
@@ -412,6 +417,7 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 			if strings.HasPrefix(respText, "354") {
 				state.inDataMode = true
 				LogInfo("[%s] Entering DATA mode, ready to receive message content", state.mailboxName)
+				LogInfo("[%s] Email transmission in progress...", state.mailboxName)
 			}
 
 		case "QUIT":
