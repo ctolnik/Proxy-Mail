@@ -141,7 +141,8 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 			if line == "." {
 				state.inDataMode = false
 				if state.upstreamConn != nil {
-					fmt.Fprintf(state.upstreamConn, ".\r\n")
+					// Send the final SMTP DATA termination
+					state.upstreamConn.Write([]byte(".\r\n"))
 					LogDebug("[%s] End of DATA sent to upstream", state.mailboxName)
 					
 					// Read the response from upstream
@@ -166,13 +167,10 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 					}
 				}
 			} else {
-				// Forward data line to upstream
+				// Forward raw data to upstream without modification
 				if state.upstreamConn != nil {
-					// Handle dot-stuffing
-					if strings.HasPrefix(line, ".") {
-						fmt.Fprintf(state.upstreamConn, ".")
-					}
-					fmt.Fprintf(state.upstreamConn, "%s\r\n", line)
+					// Write the original bytes exactly as received
+					state.upstreamConn.Write(lineBytes)
 				}
 			}
 			continue
@@ -637,22 +635,8 @@ func (s *SMTPServer) handleSMTPCommands(localConn, upstreamConn net.Conn, upstre
 			}
 			} else {
 				// Forward raw bytes to preserve encoding
-				// Only do dot escaping if needed (line starts with dot)
-				if len(lineBytes) > 0 && lineBytes[0] == '.' {
-					// Escape leading dot by adding another dot
-					upstreamConn.Write([]byte("."))
-				}
-				// Remove the \n from lineBytes and ensure CRLF ending
-				if len(lineBytes) > 0 && lineBytes[len(lineBytes)-1] == '\n' {
-					lineBytes = lineBytes[:len(lineBytes)-1] // Remove \n
-				}
-				// Remove \r if present
-				if len(lineBytes) > 0 && lineBytes[len(lineBytes)-1] == '\r' {
-					lineBytes = lineBytes[:len(lineBytes)-1] // Remove \r
-				}
-				// Forward original bytes (preserving encoding) + CRLF
+				// Forward raw bytes without any modification
 				upstreamConn.Write(lineBytes)
-				upstreamConn.Write([]byte("\r\n"))
 			}
 			continue
 		}

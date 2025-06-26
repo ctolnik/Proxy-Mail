@@ -200,23 +200,20 @@ func (s *POP3Server) handleIMAPBackend(localConn net.Conn, clientAddr string) {
 				continue
 			}
 
-			// Store username (preserving case) and find matching server config
-			clientUsername = parts[1]
-			// Find exact case-insensitive match
-			for _, server := range s.config.Servers {
-				if (server.POP3 != nil && strings.EqualFold(server.POP3.Username, clientUsername)) ||
-				   (server.IMAP != nil && strings.EqualFold(server.IMAP.Username, clientUsername)) {
-					serverConfig = &server
-					log.Printf("[POP3] Found exact match for username: %s", clientUsername)
-					break
-				}
-			}
+			// Store username as provided by client (preserve case)
+			clientUsername = strings.TrimSpace(line[5:]) // Get original case username by skipping "USER "
+			
+			// Try to find exact match first
+			serverConfig = s.findServerConfigByUsername(clientUsername)
 			
 			if serverConfig == nil {
-				// If no exact match, try to find any available server
-				serverConfig = s.config.GetServerByProtocol("imap")
-				if serverConfig == nil {
-					serverConfig = s.config.GetServerByProtocol("pop3")
+				// If no exact match, try to find any available server with IMAP/POP3
+				for _, server := range s.config.Servers {
+					if server.IMAP != nil || server.POP3 != nil {
+						serverConfig = &server
+						log.Printf("[POP3] Using server config '%s' for username: %s", server.Name, clientUsername)
+						break
+					}
 				}
 				
 				if serverConfig == nil {
@@ -224,11 +221,12 @@ func (s *POP3Server) handleIMAPBackend(localConn net.Conn, clientAddr string) {
 					log.Printf("[POP3] No server configuration found for username: %s", clientUsername)
 					continue
 				}
-				log.Printf("[POP3] Using fallback server config for username: %s", clientUsername)
+			} else {
+				log.Printf("[POP3] Found matching server config '%s' for username: %s", serverConfig.Name, clientUsername)
 			}
 
 			fmt.Fprintf(localConn, "+OK User accepted\r\n")
-			log.Printf("[POP3] PROXY -> CLIENT (%s): +OK User accepted (mapped to %s)", clientAddr, serverConfig.Name)
+			log.Printf("[POP3] PROXY -> CLIENT (%s): +OK User accepted (using %s)", clientAddr, serverConfig.Name)
 
 		case "PASS":
 			if pop3State != "AUTHORIZATION" {
