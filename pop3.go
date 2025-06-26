@@ -284,6 +284,7 @@ func (s *POP3Server) handleIMAPBackend(localConn, upstreamConn net.Conn, upstrea
 							if len(fields) >= 2 {
 								if count, err := strconv.Atoi(fields[1]); err == nil {
 									messageCount = count
+									LogInfo("📥 INBOX: Found %d emails for %s", messageCount, upstreamConfig.Username)
 								}
 							}
 						}
@@ -421,7 +422,7 @@ func (s *POP3Server) handleIMAPBackend(localConn, upstreamConn net.Conn, upstrea
 			}
 
 			fmt.Fprintf(localConn, ".\r\n")
-			log.Printf("[POP3] PROXY -> CLIENT (%s): Message %d delivered", clientAddr, msgNum)
+			LogInfo("📩 EMAIL DOWNLOADED: Message %d delivered to client for %s", msgNum, upstreamConfig.Username)
 
 		case "TOP":
 			if pop3State != "TRANSACTION" {

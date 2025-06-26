@@ -224,10 +224,25 @@ func (s *SMTPServer) handleSMTPCommands(localConn, upstreamConn net.Conn, upstre
 		// Handle DATA mode (message content)
 		if inDataMode {
 			if line == "." {
-				// End of message
-				inDataMode = false
-				log.Printf("[SMTP] CLIENT -> UPSTREAM (%s): . (end of message)", clientAddr)
-				upstreamConn.Write([]byte(".\r\n"))
+			// End of message
+			inDataMode = false
+			LogDebug("SMTP CLIENT -> UPSTREAM (%s): . (end of message)", clientAddr)
+			upstreamConn.Write([]byte(".\r\n"))
+			
+			// Read the final response from server to see if email was sent
+			if upstreamScanner.Scan() {
+				response := upstreamScanner.Text()
+				LogDebug("SMTP final response: %s", response)
+				
+				if strings.HasPrefix(response, "250") {
+					LogInfo("✅ EMAIL SENT successfully from %s", upstreamConfig.Username)
+				} else {
+					LogError("❌ EMAIL FAILED to send from %s: %s", upstreamConfig.Username, response)
+				}
+				
+				// Forward response to client
+				fmt.Fprintf(localConn, "%s\r\n", response)
+			}
 			} else {
 				// Forward raw bytes to preserve encoding
 				// Only do dot escaping if needed (line starts with dot)
@@ -330,17 +345,17 @@ func (s *SMTPServer) handleSMTPCommands(localConn, upstreamConn net.Conn, upstre
 		case "DATA":
 			// Forward DATA command
 			fmt.Fprintf(upstreamConn, "%s\r\n", line)
-			log.Printf("[SMTP] PROXY -> UPSTREAM (%s): %s", clientAddr, line)
+			LogDebug("SMTP PROXY -> UPSTREAM (%s): %s", clientAddr, line)
 
 			if upstreamScanner.Scan() {
 				response := upstreamScanner.Text()
-				log.Printf("[SMTP] UPSTREAM -> PROXY (%s): %s", clientAddr, response)
+				LogDebug("SMTP UPSTREAM -> PROXY (%s): %s", clientAddr, response)
 				fmt.Fprintf(localConn, "%s\r\n", response)
-				log.Printf("[SMTP] PROXY -> CLIENT (%s): %s", clientAddr, response)
+				LogDebug("SMTP PROXY -> CLIENT (%s): %s", clientAddr, response)
 
 				if strings.HasPrefix(response, "354") {
 					inDataMode = true
-					log.Printf("[SMTP] Entering DATA mode for client %s", clientAddr)
+					LogInfo("📧 EMAIL: Starting to receive message content for %s", upstreamConfig.Username)
 				}
 			}
 
