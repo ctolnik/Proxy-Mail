@@ -68,69 +68,19 @@ func (s *POP3Server) handleConnection(localConn net.Conn) {
 	clientAddr := localConn.RemoteAddr().String()
 	log.Printf("[POP3] Client connected from %s", clientAddr)
 
-	// Get the first available server config (prefer POP3, fallback to IMAP)
-	serverConfig := s.config.GetServerByProtocol("pop3")
-	if serverConfig == nil {
-		// Fallback to IMAP if no POP3 available
-		serverConfig = s.config.GetServerByProtocol("imap")
+	// Start without pre-selecting server config
+	s.handleIMAPBackend(localConn, clientAddr)
+}
+
+func (s *POP3Server) findServerConfigByUsername(username string) *ServerConfig {
+	// First try exact match
+	for _, server := range s.config.Servers {
+		if (server.POP3 != nil && server.POP3.Username == username) ||
+		   (server.IMAP != nil && server.IMAP.Username == username) {
+			return &server
+		}
 	}
-
-	if serverConfig == nil {
-		log.Printf("[POP3] ERROR: No POP3 or IMAP server configuration found for client %s", clientAddr)
-		fmt.Fprintf(localConn, "-ERR No mail server configured\r\n")
-		return
-	}
-
-	// Determine which upstream protocol to use
-	var useIMAP bool
-	var upstreamConfig *MailServerConfig
-	var protocol string
-
-	if serverConfig.POP3 != nil {
-		upstreamConfig = serverConfig.POP3
-		protocol = "POP3"
-		useIMAP = false
-	} else if serverConfig.IMAP != nil {
-		upstreamConfig = serverConfig.IMAP
-		protocol = "IMAP"
-		useIMAP = true
-	} else {
-		log.Printf("[POP3] ERROR: Server config '%s' has no POP3 or IMAP configuration", serverConfig.Name)
-		fmt.Fprintf(localConn, "-ERR No mail server configured\r\n")
-		return
-	}
-
-	log.Printf("[POP3] Using server config '%s' (%s upstream) for client %s", serverConfig.Name, protocol, clientAddr)
-
-	// Connect to upstream server
-	upstreamAddr := fmt.Sprintf("%s:%d", upstreamConfig.Host, upstreamConfig.Port)
-	var upstreamConn net.Conn
-	var err error
-
-	log.Printf("[POP3] Connecting to upstream %s server %s (TLS: %v) for mailbox %s", protocol, upstreamAddr, upstreamConfig.UseTLS, upstreamConfig.Username)
-
-	if upstreamConfig.UseTLS {
-		upstreamConn, err = tls.Dial("tcp", upstreamAddr, &tls.Config{ServerName: upstreamConfig.Host})
-	} else {
-		upstreamConn, err = net.Dial("tcp", upstreamAddr)
-	}
-
-	if err != nil {
-		log.Printf("[POP3] ERROR: Failed to connect to upstream %s server %s for mailbox %s: %v", protocol, upstreamAddr, upstreamConfig.Username, err)
-		fmt.Fprintf(localConn, "-ERR Cannot connect to mail server\r\n")
-		return
-	}
-	defer upstreamConn.Close()
-
-	log.Printf("[POP3] Successfully connected to upstream %s server %s for mailbox %s", protocol, upstreamAddr, upstreamConfig.Username)
-
-	if useIMAP {
-		// Handle POP3 client with IMAP upstream
-		s.handleIMAPBackend(localConn, upstreamConn, upstreamConfig, clientAddr)
-	} else {
-		// Handle POP3 client with POP3 upstream
-		s.handlePOP3Backend(localConn, upstreamConn, upstreamConfig, clientAddr)
-	}
+	return nil
 }
 
 func (s *POP3Server) handlePOP3Backend(localConn, upstreamConn net.Conn, upstreamConfig *MailServerConfig, clientAddr string) {
@@ -179,7 +129,7 @@ func (s *POP3Server) handlePOP3Backend(localConn, upstreamConn net.Conn, upstrea
 	log.Printf("[POP3] Client %s disconnected from POP3 mailbox %s", clientAddr, upstreamConfig.Username)
 }
 
-func (s *POP3Server) handleIMAPBackend(localConn, upstreamConn net.Conn, upstreamConfig *MailServerConfig, clientAddr string) {
+func (s *POP3Server) handleIMAPBackend(localConn net.Conn, clientAddr string) {
 	log.Printf("[POP3] Starting POP3-to-IMAP translation for client %s", clientAddr)
 
 	// IMAP session state
@@ -189,15 +139,18 @@ func (s *POP3Server) handleIMAPBackend(localConn, upstreamConn net.Conn, upstrea
 	var messageCount int = 0
 	var messages []IMAPMessage
 
+	// Adding user-specific state
+	var clientUsername string
+	var serverConfig *ServerConfig
+
 	// POP3 session state
 	var pop3State string = "AUTHORIZATION" // AUTHORIZATION, TRANSACTION, UPDATE
 
-	// Read IMAP greeting
-	scanner := bufio.NewScanner(upstreamConn)
-	if scanner.Scan() {
-		greeting := scanner.Text()
-		log.Printf("[POP3] IMAP-SERVER -> PROXY (%s): %s", clientAddr, greeting)
-	}
+	// Create a placeholder to store the upstream connection and scanner
+	var upstreamConn net.Conn
+	var upstreamConfig *MailServerConfig
+	var protocol string
+	var scanner *bufio.Scanner     // Add scanner at function level
 
 	// Send POP3 greeting to client
 	fmt.Fprintf(localConn, "+OK POP3 server ready (IMAP backend)\r\n")
@@ -233,9 +186,32 @@ func (s *POP3Server) handleIMAPBackend(localConn, upstreamConn net.Conn, upstrea
 				fmt.Fprintf(localConn, "-ERR Command not valid in this state\r\n")
 				continue
 			}
-			// Store username, but don't send to IMAP yet
+			if len(parts) != 2 {
+				fmt.Fprintf(localConn, "-ERR Missing username\r\n")
+				continue
+			}
+
+			// Store username and find matching server config
+			clientUsername = parts[1]
+			serverConfig = s.findServerConfigByUsername(clientUsername)
+			
+			if serverConfig == nil {
+				// If no exact match, try to find any available server
+				serverConfig = s.config.GetServerByProtocol("imap")
+				if serverConfig == nil {
+					serverConfig = s.config.GetServerByProtocol("pop3")
+				}
+				
+				if serverConfig == nil {
+					fmt.Fprintf(localConn, "-ERR Invalid username\r\n")
+					log.Printf("[POP3] No server configuration found for username: %s", clientUsername)
+					continue
+				}
+				log.Printf("[POP3] Using fallback server config for username: %s", clientUsername)
+			}
+
 			fmt.Fprintf(localConn, "+OK User accepted\r\n")
-			log.Printf("[POP3] PROXY -> CLIENT (%s): +OK User accepted", clientAddr)
+			log.Printf("[POP3] PROXY -> CLIENT (%s): +OK User accepted (mapped to %s)", clientAddr, serverConfig.Name)
 
 		case "PASS":
 			if pop3State != "AUTHORIZATION" {
@@ -243,6 +219,47 @@ func (s *POP3Server) handleIMAPBackend(localConn, upstreamConn net.Conn, upstrea
 				continue
 			}
 
+			if serverConfig == nil {
+				fmt.Fprintf(localConn, "-ERR USER command first\r\n")
+				continue
+			}
+
+			// Based on the user's credentials, set up the appropriate upstream
+			upstreamConfig = serverConfig.IMAP
+			protocol = "IMAP"
+			if upstreamConfig == nil {
+				upstreamConfig = serverConfig.POP3
+				protocol = "POP3"
+			}
+
+			if upstreamConn == nil {
+				// Connect to the upstream server using client-provided credentials
+				upstreamAddr := fmt.Sprintf("%s:%d", upstreamConfig.Host, upstreamConfig.Port)
+				var err error
+				if upstreamConfig.UseTLS {
+					upstreamConn, err = tls.Dial("tcp", upstreamAddr, &tls.Config{ServerName: upstreamConfig.Host})
+				} else {
+					upstreamConn, err = net.Dial("tcp", upstreamAddr)
+				}
+				if err != nil {
+					log.Printf("[POP3] ERROR: Failed to connect to upstream %s server %s for mailbox %s: %v", protocol, upstreamAddr, upstreamConfig.Username, err)
+					fmt.Fprintf(localConn, "-ERR Cannot connect to mail server\r\n")
+					return
+				}
+				defer upstreamConn.Close()
+
+				log.Printf("[POP3] Successfully connected to upstream %s server %s for %s", protocol, upstreamAddr, clientUsername)
+
+				// Initialize scanner for upstream responses
+				scanner = bufio.NewScanner(upstreamConn)
+
+				// Read initial greeting from IMAP server
+				if scanner.Scan() {
+					greeting := scanner.Text()
+					log.Printf("[POP3] IMAP-SERVER -> PROXY (%s): %s", clientAddr, greeting)
+				}
+			}
+		
 			// Authenticate with IMAP
 			if !authenticated {
 				imapTag++
