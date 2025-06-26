@@ -85,6 +85,7 @@ type smtpState struct {
 	upstreamConn    net.Conn
 	serverConfig    *ServerConfig
 	inDataMode      bool   // track DATA command state
+	heloHost        string // store HELO hostname for legacy clients
 }
 
 // getMailboxIdentifier returns a string identifier for the current mailbox for logging
@@ -180,10 +181,23 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 		// Handle commands with state management
 		switch command {
 		case "EHLO", "HELO":
+			// Send capabilities, making AUTH more prominent
 			fmt.Fprintf(localConn, "250-Proxy-Mail SMTP Ready\r\n")
-			fmt.Fprintf(localConn, "250-AUTH LOGIN\r\n")
+			fmt.Fprintf(localConn, "250-SIZE 35882577\r\n")  // Add common SMTP extensions
+			fmt.Fprintf(localConn, "250-8BITMIME\r\n")
+			fmt.Fprintf(localConn, "250-PIPELINING\r\n")
+			fmt.Fprintf(localConn, "250-AUTH LOGIN PLAIN\r\n")  // Make AUTH more visible
 			fmt.Fprintf(localConn, "250 STARTTLS\r\n")
-			LogDebug("[%s] SMTP sent capabilities to client %s", state.getMailboxIdentifier(), clientAddr)
+			LogDebug("[%s] SMTP sent enhanced capabilities to client %s", state.getMailboxIdentifier(), clientAddr)
+
+			// For HELO, we might need to handle legacy clients differently
+			if command == "HELO" {
+				// Store the HELO hostname if needed
+				if len(fields) > 1 {
+					state.heloHost = fields[1]
+				}
+				LogDebug("[%s] Client using legacy HELO command, hostname: %s", state.getMailboxIdentifier(), state.heloHost)
+			}
 
 		case "AUTH":
 			if len(fields) < 2 {
@@ -203,21 +217,38 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 			continue
 			
 		case "MAIL":
-			if !state.isAuthenticated {
-				fmt.Fprintf(localConn, "530 Authentication required\r\n")
-				LogError("[%s] SMTP client %s attempted MAIL FROM without authentication", state.getMailboxIdentifier(), clientAddr)
+			// Extract sender email from MAIL FROM command
+			senderEmail := s.extractEmailFromMailFrom(line)
+			if senderEmail == "" {
+				fmt.Fprintf(localConn, "501 Invalid MAIL FROM format\r\n")
+				LogError("[%s] Invalid MAIL FROM format: %s", state.getMailboxIdentifier(), line)
 				continue
 			}
 
-			// Extract sender email from MAIL FROM command
-			senderEmail := s.extractEmailFromMailFrom(line)
-			
-			// Verify sender matches authenticated user
-			if senderEmail != state.authUsername {
-				LogError("[%s] Sender mismatch: authenticated as %s but trying to send as %s",
-					state.mailboxName, state.authUsername, senderEmail)
-				fmt.Fprintf(localConn, "550 Sender address must match authenticated user\r\n")
-				continue
+			// Check if using legacy authentication (no explicit AUTH)
+			if !state.isAuthenticated {
+				// Find matching server config
+				serverConfig := s.findServerConfigByUsername(senderEmail)
+				if serverConfig == nil {
+					fmt.Fprintf(localConn, "530 Authentication required\r\n")
+					LogError("[%s] No server configuration found for sender: %s", state.getMailboxIdentifier(), senderEmail)
+					continue
+				}
+
+				// Auto-authenticate with found credentials
+				state.serverConfig = serverConfig
+				state.authUsername = senderEmail
+				state.mailboxName = senderEmail
+				state.isAuthenticated = true
+				LogInfo("[%s] Auto-authenticated legacy client %s for sender: %s", state.mailboxName, clientAddr, senderEmail)
+			} else {
+				// For explicitly authenticated clients, verify sender matches authenticated user
+				if senderEmail != state.authUsername {
+					LogError("[%s] Sender mismatch: authenticated as %s but trying to send as %s",
+						state.mailboxName, state.authUsername, senderEmail)
+					fmt.Fprintf(localConn, "550 Sender address must match authenticated user\r\n")
+					continue
+				}
 			}
 			
 			LogInfo("[%s] SMTP processing MAIL FROM command", state.mailboxName)
