@@ -227,11 +227,11 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 
 			// Check if using legacy authentication (no explicit AUTH)
 			if !state.isAuthenticated {
-				// Find matching server config
-				serverConfig := s.findServerConfigByUsername(senderEmail)
+				// Find matching server config - try to match by sender, or use any available SMTP server
+				serverConfig := s.findServerConfigBySender(senderEmail)
 				if serverConfig == nil {
-					fmt.Fprintf(localConn, "530 Authentication required\r\n")
-					LogError("[%s] No server configuration found for sender: %s", state.getMailboxIdentifier(), senderEmail)
+					fmt.Fprintf(localConn, "550 No upstream SMTP server configured for sending mail\r\n")
+					LogError("[%s] No SMTP server configuration available for sending mail from: %s", state.getMailboxIdentifier(), senderEmail)
 					continue
 				}
 
