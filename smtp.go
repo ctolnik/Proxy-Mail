@@ -84,6 +84,7 @@ type smtpState struct {
 	mailboxName     string // for logging context
 	upstreamConn    net.Conn
 	serverConfig    *ServerConfig
+	inDataMode      bool   // track DATA command state
 }
 
 // getMailboxIdentifier returns a string identifier for the current mailbox for logging
@@ -101,6 +102,17 @@ func (s *smtpState) getMailboxIdentifier() string {
 func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr string) {
 	clientReader := bufio.NewReader(localConn)
 	state := &smtpState{}
+
+	// Initial greeting
+	fmt.Fprintf(localConn, "220 Proxy-Mail SMTP Ready\r\n")
+	LogDebug("[%s] SMTP sent greeting to client %s", state.getMailboxIdentifier(), clientAddr)
+
+	// Ensure we clean up connections on exit
+	defer func() {
+		if state.upstreamConn != nil {
+			state.upstreamConn.Close()
+		}
+	}()
 
 	for {
 		// Read line from client
@@ -122,6 +134,46 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 		}
 
 		LogDebug("[%s] SMTP CLIENT -> PROXY (%s): %s", state.getMailboxIdentifier(), clientAddr, line)
+
+		// Handle DATA mode separately
+		if state.inDataMode {
+			if line == "." {
+				state.inDataMode = false
+				if state.upstreamConn != nil {
+					fmt.Fprintf(state.upstreamConn, ".\r\n")
+					LogDebug("[%s] End of DATA sent to upstream", state.mailboxName)
+					
+					// Read the response from upstream
+					upstreamReader := bufio.NewReader(state.upstreamConn)
+					response, err := upstreamReader.ReadString('\n')
+					if err != nil {
+						LogError("[%s] Failed to read upstream response: %v", state.mailboxName, err)
+						fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+						continue
+					}
+					
+					response = strings.TrimSpace(response)
+					LogDebug("[%s] UPSTREAM -> PROXY: %s", state.mailboxName, response)
+					fmt.Fprintf(localConn, "%s\r\n", response)
+					
+					if strings.HasPrefix(response, "250") {
+						LogInfo("✅ Email sent successfully from %s", state.mailboxName)
+					} else {
+						LogError("❌ Email failed to send from %s: %s", state.mailboxName, response)
+					}
+				}
+			} else {
+				// Forward data line to upstream
+				if state.upstreamConn != nil {
+					// Handle dot-stuffing
+					if strings.HasPrefix(line, ".") {
+						fmt.Fprintf(state.upstreamConn, ".")
+					}
+					fmt.Fprintf(state.upstreamConn, "%s\r\n", line)
+				}
+			}
+			continue
+		}
 
 		// Handle commands with state management
 		switch command {
@@ -177,12 +229,190 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 					fmt.Fprintf(localConn, "451 Local error in processing\r\n")
 					continue
 				}
+
+				// Read initial greeting
+				upstreamReader := bufio.NewReader(state.upstreamConn)
+				greeting, err := upstreamReader.ReadString('\n')
+				if err != nil {
+					LogError("[%s] Failed to read upstream greeting: %v", state.mailboxName, err)
+					state.upstreamConn.Close()
+					state.upstreamConn = nil
+					fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+					continue
+				}
+				LogDebug("[%s] UPSTREAM greeting: %s", state.mailboxName, strings.TrimSpace(greeting))
+
+				// Send EHLO to upstream
+				fmt.Fprintf(state.upstreamConn, "EHLO proxy-mail\r\n")
+				LogDebug("[%s] PROXY -> UPSTREAM: EHLO proxy-mail", state.mailboxName)
+				
+				// Read multi-line EHLO response
+				for {
+					response, err := upstreamReader.ReadString('\n')
+					if err != nil {
+						LogError("[%s] Failed to read EHLO response: %v", state.mailboxName, err)
+						state.upstreamConn.Close()
+						state.upstreamConn = nil
+						fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+						continue
+					}
+					
+					respText := strings.TrimSpace(response)
+					LogDebug("[%s] UPSTREAM -> PROXY: %s", state.mailboxName, respText)
+					
+					if len(respText) > 3 && respText[3] == ' ' {
+						break  // End of multi-line response
+					}
+				}
+
+				// Authenticate with upstream
+				fmt.Fprintf(state.upstreamConn, "AUTH LOGIN\r\n")
+				LogDebug("[%s] PROXY -> UPSTREAM: AUTH LOGIN", state.mailboxName)
+				
+				response, err := upstreamReader.ReadString('\n')
+				if err != nil {
+					LogError("[%s] Failed to read AUTH response: %v", state.mailboxName, err)
+					state.upstreamConn.Close()
+					state.upstreamConn = nil
+					fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+					continue
+				}
+				
+				respText := strings.TrimSpace(response)
+				LogDebug("[%s] UPSTREAM -> PROXY: %s", state.mailboxName, respText)
+				
+				if !strings.HasPrefix(respText, "334") {
+					LogError("[%s] Upstream AUTH failed: %s", state.mailboxName, respText)
+					state.upstreamConn.Close()
+					state.upstreamConn = nil
+					fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+					continue
+				}
+
+				// Send username
+				username := base64.StdEncoding.EncodeToString([]byte(state.serverConfig.SMTP.Username))
+				fmt.Fprintf(state.upstreamConn, "%s\r\n", username)
+				LogDebug("[%s] PROXY -> UPSTREAM: [base64_username]", state.mailboxName)
+				
+				response, err = upstreamReader.ReadString('\n')
+				if err != nil {
+					LogError("[%s] Failed to read username response: %v", state.mailboxName, err)
+					state.upstreamConn.Close()
+					state.upstreamConn = nil
+					fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+					continue
+				}
+				
+				respText = strings.TrimSpace(response)
+				LogDebug("[%s] UPSTREAM -> PROXY: %s", state.mailboxName, respText)
+				
+				if !strings.HasPrefix(respText, "334") {
+					LogError("[%s] Upstream username failed: %s", state.mailboxName, respText)
+					state.upstreamConn.Close()
+					state.upstreamConn = nil
+					fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+					continue
+				}
+
+				// Send password
+				password := base64.StdEncoding.EncodeToString([]byte(state.serverConfig.SMTP.Password))
+				fmt.Fprintf(state.upstreamConn, "%s\r\n", password)
+				LogDebug("[%s] PROXY -> UPSTREAM: [base64_password]", state.mailboxName)
+				
+				response, err = upstreamReader.ReadString('\n')
+				if err != nil {
+					LogError("[%s] Failed to read password response: %v", state.mailboxName, err)
+					state.upstreamConn.Close()
+					state.upstreamConn = nil
+					fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+					continue
+				}
+				
+				respText = strings.TrimSpace(response)
+				LogDebug("[%s] UPSTREAM -> PROXY: %s", state.mailboxName, respText)
+				
+				if !strings.HasPrefix(respText, "235") {
+					LogError("[%s] Upstream authentication failed: %s", state.mailboxName, respText)
+					state.upstreamConn.Close()
+					state.upstreamConn = nil
+					fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+					continue
+				}
+				
+				LogInfo("[%s] Successfully authenticated with upstream SMTP server", state.mailboxName)
 			}
 
-			// Start normal SMTP session with the selected upstream
-			defer state.upstreamConn.Close()
-			s.handleSMTPSession(localConn, state.upstreamConn, state.serverConfig.SMTP, clientAddr)
-			return
+			// Forward MAIL FROM command to upstream
+			fmt.Fprintf(state.upstreamConn, "%s\r\n", line)
+			LogDebug("[%s] PROXY -> UPSTREAM: %s", state.mailboxName, line)
+			
+			// Read response from upstream
+			upstreamReader := bufio.NewReader(state.upstreamConn)
+			response, err := upstreamReader.ReadString('\n')
+			if err != nil {
+				LogError("[%s] Failed to read MAIL FROM response: %v", state.mailboxName, err)
+				fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+				continue
+			}
+			
+			// Forward response to client
+			fmt.Fprintf(localConn, "%s", response)
+			respText := strings.TrimSpace(response)
+			LogDebug("[%s] UPSTREAM -> CLIENT: %s", state.mailboxName, respText)
+
+		case "RCPT":
+			if !state.isAuthenticated || state.upstreamConn == nil {
+				fmt.Fprintf(localConn, "530 Authentication required\r\n")
+				continue
+			}
+
+			// Forward RCPT TO command to upstream
+			fmt.Fprintf(state.upstreamConn, "%s\r\n", line)
+			LogDebug("[%s] PROXY -> UPSTREAM: %s", state.mailboxName, line)
+			
+			// Read response from upstream
+			upstreamReader := bufio.NewReader(state.upstreamConn)
+			response, err := upstreamReader.ReadString('\n')
+			if err != nil {
+				LogError("[%s] Failed to read RCPT TO response: %v", state.mailboxName, err)
+				fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+				continue
+			}
+			
+			// Forward response to client
+			fmt.Fprintf(localConn, "%s", response)
+			respText := strings.TrimSpace(response)
+			LogDebug("[%s] UPSTREAM -> CLIENT: %s", state.mailboxName, respText)
+
+		case "DATA":
+			if !state.isAuthenticated || state.upstreamConn == nil {
+				fmt.Fprintf(localConn, "530 Authentication required\r\n")
+				continue
+			}
+
+			// Forward DATA command to upstream
+			fmt.Fprintf(state.upstreamConn, "%s\r\n", line)
+			LogDebug("[%s] PROXY -> UPSTREAM: %s", state.mailboxName, line)
+			
+			// Read response from upstream
+			upstreamReader := bufio.NewReader(state.upstreamConn)
+			response, err := upstreamReader.ReadString('\n')
+			if err != nil {
+				LogError("[%s] Failed to read DATA response: %v", state.mailboxName, err)
+				fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+				continue
+			}
+			
+			// Forward response to client
+			fmt.Fprintf(localConn, "%s", response)
+			respText := strings.TrimSpace(response)
+			LogDebug("[%s] UPSTREAM -> CLIENT: %s", state.mailboxName, respText)
+			
+			// If server is ready to receive data
+			if strings.HasPrefix(respText, "354") {
+				state.inDataMode = true
+				LogInfo("[%s] Entering DATA mode, ready to receive message content", state.mailboxName)
+			}
 
 		case "QUIT":
 			fmt.Fprintf(localConn, "221 Goodbye\r\n")
@@ -240,9 +470,26 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 				continue
 			}
 			
-			// If we got here, client is authenticated but using a command we don't handle explicitly
-			fmt.Fprintf(localConn, "502 Command not implemented\r\n")
-			LogDebug("[%s] SMTP client %s sent unhandled command: %s", state.mailboxName, clientAddr, command)
+			// Forward other commands to upstream if authenticated and connected
+			if state.upstreamConn != nil {
+				fmt.Fprintf(state.upstreamConn, "%s\r\n", line)
+				LogDebug("[%s] PROXY -> UPSTREAM: %s", state.mailboxName, line)
+				
+				upstreamReader := bufio.NewReader(state.upstreamConn)
+				response, err := upstreamReader.ReadString('\n')
+				if err != nil {
+					LogError("[%s] Failed to read response for command %s: %v", state.mailboxName, command, err)
+					fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+					continue
+				}
+				
+				fmt.Fprintf(localConn, "%s", response)
+				respText := strings.TrimSpace(response)
+				LogDebug("[%s] UPSTREAM -> CLIENT: %s", state.mailboxName, respText)
+			} else {
+				fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+				LogError("[%s] No upstream connection available for command: %s", state.mailboxName, command)
+			}
 		}
 	}
 
