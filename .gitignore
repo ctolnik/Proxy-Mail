@@ -34,3 +34,4 @@ go.work.sum
 config.yaml
 proxy-mail
 Proxy-Mail
+*.log
