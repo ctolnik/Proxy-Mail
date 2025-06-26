@@ -66,7 +66,7 @@ func (s *SMTPServer) handleConnection(localConn net.Conn) {
 	defer localConn.Close()
 
 	clientAddr := localConn.RemoteAddr().String()
-	LogInfo("SMTP client connected from %s", clientAddr)
+	LogInfo("📧 SMTP: Client connected from %s", clientAddr)
 
 	// Send initial greeting to client
 	fmt.Fprintf(localConn, "220 Proxy-Mail SMTP Ready\r\n")
