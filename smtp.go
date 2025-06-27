@@ -2,14 +2,29 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"log"
 	"net"
+	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
+
+// charsetRegexp matches Content-Type charset parameter
+var charsetRegexp = regexp.MustCompile(`(?i)charset\s*=\s*"?([^";,\s]+)"?`)
+
+// detectCharset extracts charset from email headers
+func detectCharset(headers []byte) string {
+	matches := charsetRegexp.FindSubmatch(headers)
+	if len(matches) > 1 {
+		return string(matches[1])
+	}
+	return ""
+}
 
 type SMTPServer struct {
 	config   *Config
@@ -99,6 +114,68 @@ func (s *smtpState) getMailboxIdentifier() string {
 	return "unknown"
 }
 
+// handleSMTPDataMode handles the DATA command in binary-safe mode
+// to preserve original email encoding
+func (s *SMTPServer) handleSMTPDataMode(localConn net.Conn, upstreamConn net.Conn, clientAddr string, mailboxName string) error {
+	// Read raw bytes using a larger buffer for efficiency
+	reader := bufio.NewReaderSize(localConn, 32*1024)
+	var messageBuffer bytes.Buffer
+	var headerBuffer bytes.Buffer
+	inHeaders := true
+	var charset string
+
+	// Use a timeout for reading the entire message
+	if err := localConn.SetReadDeadline(time.Now().Add(5 * time.Minute)); err != nil {
+		return fmt.Errorf("failed to set read deadline: %v", err)
+	}
+	defer localConn.SetReadDeadline(time.Time{})
+
+	for {
+		// Read line as raw bytes
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			return fmt.Errorf("error reading message data: %v", err)
+		}
+
+		// Still collecting headers
+		if inHeaders {
+			headerBuffer.Write(line)
+			// Check for end of headers (empty line)
+			if len(line) == 2 && bytes.Equal(line, []byte{'\r', '\n'}) {
+				inHeaders = false
+				// Detect charset from collected headers
+				charset = detectCharset(headerBuffer.Bytes())
+				if charset != "" {
+					LogInfo("📧 Detected email charset: %s", charset)
+				}
+			}
+		}
+
+		// Store the complete message
+		messageBuffer.Write(line)
+
+		// Check for message end (.<CRLF>)
+		if len(line) == 3 && line[0] == '.' && line[1] == '\r' && line[2] == '\n' {
+			// Found the end marker
+			if messageBuffer.Len() > 3 {
+				// Forward the complete message to upstream
+				if _, err := upstreamConn.Write(messageBuffer.Bytes()); err != nil {
+					return fmt.Errorf("error forwarding message to upstream: %v", err)
+				}
+				LogInfo("📧 Forwarded message (%d bytes) with original encoding%s", 
+					messageBuffer.Len(),
+					func() string {
+						if charset != "" {
+							return fmt.Sprintf(" (charset: %s)", charset)
+						}
+						return ""
+					}())
+				return nil
+			}
+		}
+	}
+}
+
 // handleSMTPSessionDynamic handles SMTP session with dynamic mailbox selection
 func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr string) {
 	clientReader := bufio.NewReader(localConn)
@@ -136,43 +213,12 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 
 		LogDebug("[%s] SMTP CLIENT -> PROXY (%s): %s", state.getMailboxIdentifier(), clientAddr, line)
 
-		// Handle DATA mode separately
+		// Handle DATA mode separately - but we'll use the new binary-safe method
 		if state.inDataMode {
-			if line == "." {
-				state.inDataMode = false
-				if state.upstreamConn != nil {
-					// Send the final SMTP DATA termination
-					state.upstreamConn.Write([]byte(".\r\n"))
-					LogDebug("[%s] End of DATA sent to upstream", state.mailboxName)
-					
-					// Read the response from upstream
-					upstreamReader := bufio.NewReader(state.upstreamConn)
-					response, err := upstreamReader.ReadString('\n')
-					if err != nil {
-						LogError("[%s] Failed to read upstream response: %v", state.mailboxName, err)
-						fmt.Fprintf(localConn, "451 Local error in processing\r\n")
-						continue
-					}
-					
-					response = strings.TrimSpace(response)
-					LogDebug("[%s] UPSTREAM -> PROXY: %s", state.mailboxName, response)
-					fmt.Fprintf(localConn, "%s\r\n", response)
-					
-					if strings.HasPrefix(response, "250") {
-						LogInfo("✅ Email sent successfully from %s", state.mailboxName)
-						LogInfo("[%s] SMTP transaction completed successfully", state.mailboxName)
-					} else {
-						LogError("❌ Email failed to send from %s: %s", state.mailboxName, response)
-						LogError("[%s] SMTP transaction failed", state.mailboxName)
-					}
-				}
-			} else {
-				// Forward raw data to upstream without modification
-				if state.upstreamConn != nil {
-					// Write the original bytes exactly as received
-					state.upstreamConn.Write(lineBytes)
-				}
-			}
+			// Instead of handling the data processing here, we now use handleSMTPDataMode
+			// This is just to catch any edge cases where the old state machine still needs this flag
+			// The actual data processing is now done in the case "DATA" section below
+			state.inDataMode = false
 			continue
 		}
 
@@ -444,9 +490,35 @@ func (s *SMTPServer) handleSMTPSessionDynamic(localConn net.Conn, clientAddr str
 			
 			// If server is ready to receive data
 			if strings.HasPrefix(respText, "354") {
-				state.inDataMode = true
 				LogInfo("[%s] Entering DATA mode, ready to receive message content", state.mailboxName)
 				LogInfo("[%s] Email transmission in progress...", state.mailboxName)
+				
+				// Use binary-safe DATA handling to preserve original encoding
+				if err := s.handleSMTPDataMode(localConn, state.upstreamConn, clientAddr, state.mailboxName); err != nil {
+					LogError("[%s] Error in DATA mode: %v", state.mailboxName, err)
+					fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+					continue
+				}
+				
+				// Read the response from upstream after data transmission
+				response, err = upstreamReader.ReadString('\n')
+				if err != nil {
+					LogError("[%s] Failed to read upstream response: %v", state.mailboxName, err)
+					fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+					continue
+				}
+				
+				respText = strings.TrimSpace(response)
+				LogDebug("[%s] UPSTREAM -> PROXY: %s", state.mailboxName, respText)
+				fmt.Fprintf(localConn, "%s\r\n", respText)
+				
+				if strings.HasPrefix(respText, "250") {
+					LogInfo("✅ Email sent successfully from %s", state.mailboxName)
+					LogInfo("[%s] SMTP transaction completed successfully", state.mailboxName)
+				} else {
+					LogError("❌ Email failed to send from %s: %s", state.mailboxName, respText)
+					LogError("[%s] SMTP transaction failed", state.mailboxName)
+				}
 			}
 
 		case "QUIT":
@@ -730,8 +802,27 @@ func (s *SMTPServer) handleSMTPCommands(localConn, upstreamConn net.Conn, upstre
 				LogDebug("SMTP PROXY -> CLIENT (%s): %s", clientAddr, response)
 
 				if strings.HasPrefix(response, "354") {
-					inDataMode = true
 					LogInfo("📧 EMAIL: Starting to receive message content for %s", upstreamConfig.Username)
+					
+					// Use binary-safe DATA handling to preserve original encoding
+					if err := s.handleSMTPDataMode(localConn, upstreamConn, clientAddr, upstreamConfig.Username); err != nil {
+						LogError("❌ Error in DATA mode: %v", err)
+						fmt.Fprintf(localConn, "451 Local error in processing\r\n")
+						continue
+					}
+					
+					// The handleSMTPDataMode function handles reading the response from upstream
+					// So we don't need to do it here again
+					if upstreamScanner.Scan() {
+						response = upstreamScanner.Text()
+						LogDebug("SMTP final response: %s", response)
+						if strings.HasPrefix(response, "250") {
+							LogInfo("✅ EMAIL SENT successfully from %s", upstreamConfig.Username)
+						} else {
+							LogError("❌ EMAIL FAILED to send from %s: %s", upstreamConfig.Username, response)
+						}
+						fmt.Fprintf(localConn, "%s\r\n", response)
+					}
 				}
 			}
 
